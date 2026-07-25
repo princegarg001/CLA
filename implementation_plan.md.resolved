@@ -1,0 +1,172 @@
+# AlphoTech CLA v2 — Complete Backend Build
+
+Build the full Node.js/Express backend replacing the current stub scaffold with real service modules, Supabase database, cron automation, webhook handlers, and AI intelligence engine.
+
+## Resolved Decisions
+
+| Question | Decision |
+|----------|----------|
+| **OpenAI model** | Configurable via `OPENAI_MODEL` env var. Defaults to `gpt-4o-mini`. Switch to `gpt-4o`, `gpt-4-turbo`, or any model by changing one env var. |
+| **Supabase** | Full Supabase integration as the real database. SQL migration file included. JSON fallback only when Supabase keys are empty. |
+| **Apollo API** | v1 REST API (`api.apollo.io/api/v1/`) — confirmed. |
+| **Twitter tiers** | Graceful tier degradation. `TWITTER_TIER` env var (`free`/`basic`/`pro`). Free = post only. Basic = + DMs + analytics. Pro = full access. Features degrade cleanly. |
+
+---
+
+## What Gets Built (40+ files)
+
+```
+backend/
+├── .env.example                  [MODIFY] All keys + new vars
+├── package.json                  [MODIFY] Add 9 new dependencies
+├── supabase_schema.sql           [NEW] Full migration SQL
+├── src/
+│   ├── index.js                  [MODIFY] Cron, error handling, graceful shutdown
+│   ├── config.js                 [MODIFY] All env vars + isConfigured() helper
+│   ├── db.js                     [MODIFY] Supabase client + JSON fallback
+│   ├── middleware/
+│   │   ├── errorHandler.js       [NEW]
+│   │   ├── rateLimiter.js        [NEW]
+│   │   └── apiKeyAuth.js         [NEW]
+│   ├── routes/
+│   │   ├── leads.js              [NEW] Lead CRUD + scoring + pipeline
+│   │   ├── apollo.js             [NEW] Apollo search, enrich, sequences
+│   │   ├── umami.js              [NEW] Umami analytics
+│   │   ├── sentry.js             [NEW] Sentry issues + health
+│   │   ├── twitter.js            [NEW] Tweet CRUD, DMs, analytics
+│   │   ├── gumroad.js            [NEW] Products, sales, stats
+│   │   ├── freelance.js          [NEW] SolidGigs + Contra + Startups.rip
+│   │   ├── revenue.js            [NEW] TrustMRR + deals + runway
+│   │   ├── agents.js             [NEW] AgentScope, Verdent, HeadAI, Gro
+│   │   ├── outreach.js           [NEW] Inbox, compose, AI generate
+│   │   ├── settings.js           [NEW] Integration status + app settings
+│   │   ├── warRoom.js            [NEW] Aggregated feed + missions
+│   │   ├── webhooks.js           [NEW] Gro, BetaList, email, Gumroad
+│   │   └── intelligence.js       [NEW] Lead scoring, AI briefs, reports
+│   ├── services/
+│   │   ├── apolloService.js      [NEW]
+│   │   ├── umamiService.js       [NEW]
+│   │   ├── sentryService.js      [NEW]
+│   │   ├── twitterService.js     [NEW]
+│   │   ├── trustmrrService.js    [NEW]
+│   │   ├── gumroadService.js     [NEW]
+│   │   ├── agentscopeService.js  [NEW]
+│   │   ├── verdentService.js     [NEW]
+│   │   ├── headaiService.js      [NEW]
+│   │   ├── webrobotsService.js   [NEW]
+│   │   ├── rssService.js         [NEW]
+│   │   ├── aiService.js          [NEW] OpenAI — configurable model
+│   │   └── emailService.js       [NEW]
+│   ├── cron/
+│   │   ├── scheduler.js          [NEW]
+│   │   ├── warRoomBrief.js       [NEW]
+│   │   ├── jobFetch.js           [NEW]
+│   │   ├── rssFetch.js           [NEW]
+│   │   ├── leadScoring.js        [NEW]
+│   │   └── weeklyReport.js       [NEW]
+│   └── utils/
+│       ├── logger.js             [NEW]
+│       └── helpers.js            [NEW]
+└── data/
+    └── db.json                   [existing] Local JSON fallback
+```
+
+---
+
+## Key Design Decisions
+
+### 1. Configurable OpenAI Model
+```env
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini          # Change to gpt-4o, gpt-4-turbo, etc.
+OPENAI_MAX_TOKENS=2048            # Optional override
+```
+The `aiService.js` reads `OPENAI_MODEL` from config and uses it everywhere. Switch models by changing one line in `.env`.
+
+### 2. Supabase as Real Database
+Full SQL schema with 9 tables: `leads`, `deals`, `sequences`, `messages`, `templates`, `settings`, `icp_profiles`, `scheduled_posts`, `agent_runs`. Run the migration in your Supabase dashboard SQL editor. RLS policies included for security.
+
+### 3. Twitter Tier Degradation
+```env
+TWITTER_TIER=free                  # free | basic | pro
+```
+| Feature | Free | Basic ($100/mo) | Pro ($5K/mo) |
+|---------|------|-----------------|--------------|
+| Post tweets | ✅ 1500/mo | ✅ 3000/mo | ✅ 300K/mo |
+| Read tweets | ❌ | ✅ | ✅ |
+| DMs | ❌ | ✅ | ✅ |
+| Analytics | ❌ | ✅ | ✅ |
+| Search | ❌ | ❌ | ✅ |
+
+### 4. Graceful Degradation Pattern (All Services)
+Every service checks if its API key is configured:
+- **Configured** → makes real API calls with retries + error handling
+- **Not configured** → returns realistic sample data matching Flutter screen expectations
+
+This means the app works out of the box with zero keys, and you light up real integrations one at a time.
+
+---
+
+## Supabase Schema (will be in `supabase_schema.sql`)
+
+9 tables:
+- `leads` — All leads from all sources with scoring
+- `deals` — Closed revenue deals
+- `sequences` — Apollo email sequences tracking
+- `messages` — Outreach messages (all channels)
+- `templates` — Message templates
+- `settings` — App configuration
+- `icp_profiles` — Saved Ideal Client Profiles
+- `scheduled_posts` — Twitter post scheduler
+- `agent_runs` — AI agent execution logs
+
+---
+
+## After Build: Keys & Config You'll Need
+
+Here's everything you'll need to fill in `.env` to get started:
+
+### Essential (get these first)
+| Key | Where to get it | Required for |
+|-----|----------------|--------------|
+| `SUPABASE_URL` | [supabase.com](https://supabase.com) → Project → Settings → API | Database |
+| `SUPABASE_KEY` | Same page → `anon` public key | Database |
+| `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) → API Keys | AI features |
+
+### Integrations (add as needed)
+| Key | Where to get it |
+|-----|----------------|
+| `APOLLO_API_KEY` | [app.apollo.io](https://app.apollo.io) → Settings → Integrations → API |
+| `UMAMI_TOKEN` + `UMAMI_SITE_ID` + `UMAMI_BASE_URL` | Your Umami instance → Settings |
+| `SENTRY_AUTH_TOKEN` + `SENTRY_ORG` + `SENTRY_PROJECT` | [sentry.io](https://sentry.io) → Settings → Auth Tokens |
+| `TWITTER_BEARER_TOKEN` + OAuth keys | [developer.twitter.com](https://developer.twitter.com) → Dashboard |
+| `TRUSTMRR_API_KEY` + `TRUSTMRR_BASE_URL` | TrustMRR dashboard → API |
+| `GUMROAD_ACCESS_TOKEN` | [gumroad.com](https://gumroad.com) → Settings → Advanced |
+| `AGENTSCOPE_API_KEY` + `AGENTSCOPE_API_URL` | AgentScope dashboard |
+| `VERDENT_API_KEY` | Verdent.ai dashboard |
+| `HEADAI_API_KEY` | HeadAI dashboard |
+| `WEBROBOTS_API_KEY` | WebRobots dashboard |
+
+### Optional / RSS-based
+| Key | Default |
+|-----|---------|
+| `BETALIST_RSS_URL` | `https://betalist.com/feed` |
+| `STARTUPSRIP_RSS` | `https://startups.rip/feed` |
+| `SOLIDGIGS_INBOUND_EMAIL` | Email forwarding address |
+| `CONTRA_INBOUND_EMAIL` | Email forwarding address |
+
+---
+
+## Verification Plan
+
+### Automated
+1. `npm install` → no errors
+2. `npm run dev` → server starts on port 8080
+3. `curl http://localhost:8080/api/warroom/missions` → returns sample missions
+4. `curl http://localhost:8080/api/settings/integrations` → shows all integration statuses
+5. Every route returns valid JSON with sample data when no API keys are set
+
+### Manual
+- Fill in Supabase keys → verify DB operations work
+- Fill in one API key at a time → verify routes switch from sample to live data
+- Test cron jobs with `CRON_ENABLED=true`

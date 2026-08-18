@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import '../../core/theme/app_colors.dart';
-import '../../core/theme/app_shadows.dart';
+import '../../data/models/lead.dart';
+import '../../data/models/misc_models.dart';
+import '../../providers/freelance_provider.dart';
 import '../../widgets/shared_components.dart';
 
 class FreelanceRadarScreen extends StatefulWidget {
@@ -13,14 +16,22 @@ class FreelanceRadarScreen extends StatefulWidget {
 
 class _FreelanceRadarScreenState extends State<FreelanceRadarScreen> {
   int _selectedTab = 0;
+  final Set<String> _dismissed = {};
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => context.read<FreelanceProvider>().load());
+  }
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<FreelanceProvider>();
     return Scaffold(
       backgroundColor: AppColors.scaffoldBg,
       body: Column(
         children: [
-          _buildHeader(),
+          _buildHeader(provider),
           const SizedBox(height: 4),
           AppTabBar(
             tabs: const ['SolidGigs', 'Contra', 'Startups.rip'],
@@ -29,29 +40,35 @@ class _FreelanceRadarScreenState extends State<FreelanceRadarScreen> {
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: IndexedStack(
-              index: _selectedTab,
-              children: [
-                _buildSolidGigsList(),
-                _buildContraList(),
-                _buildStartupsRipFeed(),
-              ],
-            ),
+            child: provider.isLoading && provider.solidGigs.isEmpty && provider.contra.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : RefreshIndicator(
+                    onRefresh: () => context.read<FreelanceProvider>().load(),
+                    child: IndexedStack(
+                      index: _selectedTab,
+                      children: [
+                        _buildJobList(provider.solidGigs.where((l) => !_dismissed.contains(l.id)).toList(), 'solidgigs'),
+                        _buildJobList(provider.contra.where((l) => !_dismissed.contains(l.id)).toList(), 'contra'),
+                        _buildStartupsRipFeed(provider.startupsRip),
+                      ],
+                    ),
+                  ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(FreelanceProvider provider) {
+    final total = provider.solidGigs.length + provider.contra.length;
+    final applied = [...provider.solidGigs, ...provider.contra].where((l) => l.status != 'new').length;
+    final avgScore = total == 0 ? 0 : [...provider.solidGigs, ...provider.contra].map((l) => l.score).reduce((a, b) => a + b) / total;
+
     return Container(
       width: double.infinity,
       decoration: const BoxDecoration(
         gradient: AppColors.headerGradient,
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(28),
-          bottomRight: Radius.circular(28),
-        ),
+        borderRadius: BorderRadius.only(bottomLeft: Radius.circular(28), bottomRight: Radius.circular(28)),
       ),
       child: SafeArea(
         bottom: false,
@@ -64,29 +81,24 @@ class _FreelanceRadarScreenState extends State<FreelanceRadarScreen> {
                 children: [
                   Container(
                     padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)),
                     child: const Icon(Icons.radar_rounded, color: Colors.white, size: 22),
                   ),
                   const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Freelance Radar',
-                      style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white),
-                    ),
+                  Expanded(child: Text('Freelance Radar', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white))),
+                  GestureDetector(
+                    onTap: () => context.read<FreelanceProvider>().load(),
+                    child: _headerAction(Icons.refresh_rounded),
                   ),
-                  _headerAction(Icons.refresh_rounded),
                 ],
               ),
               const SizedBox(height: 16),
               Row(
                 children: [
-                  _quickStat('New Jobs', '7'),
-                  _quickStat('Applied', '12'),
-                  _quickStat('Responses', '3'),
-                  _quickStat('Fit Score', '8.2'),
+                  _quickStat('New Jobs', '$total'),
+                  _quickStat('Applied', '$applied'),
+                  _quickStat('Insights', '${provider.startupsRip.length}'),
+                  _quickStat('Avg Fit', avgScore == 0 ? '—' : avgScore.toStringAsFixed(1)),
                 ],
               ),
             ],
@@ -98,10 +110,7 @@ class _FreelanceRadarScreenState extends State<FreelanceRadarScreen> {
 
   Widget _headerAction(IconData icon) => Container(
         padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(12),
-        ),
+        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)),
         child: Icon(icon, color: Colors.white, size: 20),
       );
 
@@ -115,26 +124,24 @@ class _FreelanceRadarScreenState extends State<FreelanceRadarScreen> {
         ),
       );
 
-  Widget _buildSolidGigsList() {
-    final jobs = [
-      _JobData('Backend API Development for HealthTech', 'MedFlow Inc', '\$5K–\$8K', '2h ago', 8.5, ['Python', 'FastAPI', 'AWS'], false),
-      _JobData('Microservices Migration', 'ShipQuick', '\$10K–\$15K', '4h ago', 9.0, ['Node.js', 'Docker', 'K8s'], false),
-      _JobData('Fintech Payment Integration', 'PayBridge', '\$7K–\$12K', '6h ago', 8.8, ['Python', 'Stripe', 'PostgreSQL'], true),
-      _JobData('DevOps & CI/CD Setup', 'CloudFirst', '\$3K–\$5K', '8h ago', 7.5, ['AWS', 'Terraform', 'GitHub Actions'], false),
-      _JobData('Real-time Data Pipeline', 'DataSync', '\$8K–\$14K', '12h ago', 8.0, ['Python', 'Kafka', 'Redis'], false),
-    ];
-
+  Widget _buildJobList(List<Lead> jobs, String platform) {
+    if (jobs.isEmpty) {
+      return Center(child: Text('No jobs matched yet.', style: GoogleFonts.inter(color: AppColors.textTertiary)));
+    }
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       itemCount: jobs.length,
-      itemBuilder: (context, index) => _buildJobCard(jobs[index]),
+      itemBuilder: (context, index) => _buildJobCard(jobs[index], platform),
     );
   }
 
-  Widget _buildJobCard(_JobData job) {
+  Widget _buildJobCard(Lead job, String platform) {
+    final budget = job.raw['budget']?.toString();
+    final tags = (job.raw['tags'] as List?)?.map((e) => e.toString()).toList() ?? const <String>[];
+    final applied = job.status != 'new';
+
     return AppCard(
       margin: const EdgeInsets.only(bottom: 10),
-      onTap: () {},
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -145,63 +152,49 @@ class _FreelanceRadarScreenState extends State<FreelanceRadarScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(job.title, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    Text(job.intentSignal ?? job.displayTitle, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                     const SizedBox(height: 3),
-                    Text(job.company, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary)),
+                    Text(job.company ?? 'Unknown company', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary)),
                   ],
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: job.score >= 8.5
-                      ? AppColors.successLight
-                      : job.score >= 7
-                          ? AppColors.warningLight
-                          : AppColors.surfaceBg,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  '${job.score}/10',
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: job.score >= 8.5 ? AppColors.success : job.score >= 7 ? AppColors.warning : AppColors.textSecondary,
-                  ),
-                ),
-              ),
+              StatusBadge.score(job.score),
             ],
           ),
           const SizedBox(height: 10),
           Row(
             children: [
-              Icon(Icons.attach_money_rounded, size: 14, color: AppColors.success),
-              const SizedBox(width: 2),
-              Text(job.budget, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.success)),
-              const SizedBox(width: 16),
-              Icon(Icons.access_time_rounded, size: 14, color: AppColors.textTertiary),
-              const SizedBox(width: 2),
-              Text(job.posted, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary)),
-              if (job.applied) ...[
+              if (budget != null) ...[
+                Icon(Icons.attach_money_rounded, size: 14, color: AppColors.success),
+                Text(budget, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.success)),
+                const SizedBox(width: 16),
+              ],
+              if (job.region != null) ...[
+                Icon(Icons.flag_rounded, size: 14, color: AppColors.textTertiary),
+                const SizedBox(width: 2),
+                Text(job.region!, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary)),
+              ],
+              if (applied) ...[
                 const Spacer(),
-                StatusBadge(label: 'Applied', bgColor: AppColors.infoLight, textColor: AppColors.info),
+                const StatusBadge(label: 'Applied', bgColor: AppColors.infoLight, textColor: AppColors.info),
               ],
             ],
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: job.tags.map((t) => Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryLight.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(t, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.primary)),
-                )).toList(),
-          ),
-          if (!job.applied) ...[
+          if (tags.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: tags
+                  .map((t) => Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(color: AppColors.primaryLight.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
+                        child: Text(t, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.primary)),
+                      ))
+                  .toList(),
+            ),
+          ],
+          if (!applied) ...[
             const SizedBox(height: 12),
             Row(
               children: [
@@ -209,7 +202,7 @@ class _FreelanceRadarScreenState extends State<FreelanceRadarScreen> {
                   child: SizedBox(
                     height: 36,
                     child: ElevatedButton.icon(
-                      onPressed: () {},
+                      onPressed: () => _generatePitch(job, platform),
                       icon: const Icon(Icons.auto_awesome_rounded, size: 14),
                       label: Text('Generate Pitch', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600)),
                       style: ElevatedButton.styleFrom(
@@ -225,7 +218,7 @@ class _FreelanceRadarScreenState extends State<FreelanceRadarScreen> {
                 SizedBox(
                   height: 36,
                   child: OutlinedButton(
-                    onPressed: () {},
+                    onPressed: () => setState(() => _dismissed.add(job.id)),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.textSecondary,
                       side: const BorderSide(color: AppColors.border),
@@ -242,113 +235,81 @@ class _FreelanceRadarScreenState extends State<FreelanceRadarScreen> {
     );
   }
 
-  Widget _buildContraList() {
-    final projects = [
-      _JobData('SaaS Backend Development', 'Contra Client', '\$6K', '3h ago', 8.2, ['Node.js', 'MongoDB'], false),
-      _JobData('API Gateway & Auth System', 'Contra Client', '\$4K', '5h ago', 7.8, ['Python', 'OAuth'], false),
-      _JobData('E-commerce Backend', 'Contra Client', '\$9K', '8h ago', 7.0, ['Django', 'PostgreSQL'], true),
-    ];
-
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      itemCount: projects.length,
-      itemBuilder: (context, index) => _buildJobCard(projects[index]),
+  Future<void> _generatePitch(Lead job, String platform) async {
+    final provider = context.read<FreelanceProvider>();
+    final ok = await provider.generatePitch(job.id, platform);
+    if (!mounted) return;
+    if (!ok || provider.lastPitch == null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(provider.error ?? 'Could not generate a pitch')));
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.cardBg,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(left: 20, right: 20, top: 20, bottom: MediaQuery.of(context).viewInsets.bottom + 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('AI-generated pitch', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            const SizedBox(height: 12),
+            Text(provider.lastPitch!, style: GoogleFonts.inter(fontSize: 14, color: AppColors.textPrimary, height: 1.5)),
+            const SizedBox(height: 16),
+            AccentButton(label: 'Close', onPressed: () => Navigator.pop(context)),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _buildStartupsRipFeed() {
-    final insights = [
-      {
-        'title': 'TechVault shut down — founder starting new company',
-        'subtitle': 'CEO previously built backend infra. Could need AlphoTech.',
-        'action': 'Find on Apollo',
-        'icon': Icons.person_search_rounded,
-        'color': AppColors.primary,
-      },
-      {
-        'title': 'Common failure: Manual deployment causing downtime',
-        'subtitle': '12 startups this quarter failed due to no CI/CD → content angle',
-        'action': 'Generate Thread',
-        'icon': Icons.edit_note_rounded,
-        'color': AppColors.accent,
-      },
-      {
-        'title': 'SnapData pivoting — needs backend rewrite',
-        'subtitle': 'Series A company, 30 employees, switching from monolith',
-        'action': 'Add to Pipeline',
-        'icon': Icons.add_circle_outline_rounded,
-        'color': AppColors.success,
-      },
-    ];
-
+  Widget _buildStartupsRipFeed(List<RssItem> items) {
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       children: [
         AppCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
             children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: AppColors.error.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(Icons.bug_report_rounded, color: AppColors.error, size: 18),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Startups.rip Intelligence', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                        Text('Weekly digest • 3 opportunities found', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary)),
-                      ],
-                    ),
-                  ),
-                ],
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: AppColors.error.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.bug_report_rounded, color: AppColors.error, size: 18),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Startups.rip Intelligence', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    Text('${items.length} items in the latest digest', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary)),
+                  ],
+                ),
               ),
             ],
           ),
         ),
         const SizedBox(height: 4),
-        ...insights.map((i) => AppCard(
+        if (items.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: Text('No digest items yet.', style: GoogleFonts.inter(color: AppColors.textTertiary), textAlign: TextAlign.center),
+          ),
+        ...items.map((i) => AppCard(
               margin: const EdgeInsets.only(bottom: 10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(i['title'] as String, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                  const SizedBox(height: 4),
-                  Text(i['subtitle'] as String, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary)),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    height: 34,
-                    child: ElevatedButton.icon(
-                      onPressed: () {},
-                      icon: Icon(i['icon'] as IconData, size: 14),
-                      label: Text(i['action'] as String, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: (i['color'] as Color).withValues(alpha: 0.1),
-                        foregroundColor: i['color'] as Color,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ),
+                  Text(i.title, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                  if (i.summary != null) ...[
+                    const SizedBox(height: 4),
+                    Text(i.summary!, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary), maxLines: 3, overflow: TextOverflow.ellipsis),
+                  ],
                 ],
               ),
             )),
       ],
     );
   }
-}
-
-class _JobData {
-  final String title, company, budget, posted;
-  final double score;
-  final List<String> tags;
-  final bool applied;
-  _JobData(this.title, this.company, this.budget, this.posted, this.score, this.tags, this.applied);
 }

@@ -1,8 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import 'core/config/app_config.dart';
+import 'core/network/api_client.dart';
 import 'core/theme/app_colors.dart';
 import 'core/theme/app_theme.dart';
+import 'data/repositories/agents_repository.dart';
+import 'data/repositories/analytics_repository.dart';
+import 'data/repositories/apollo_repository.dart';
+import 'data/repositories/freelance_repository.dart';
+import 'data/repositories/growth_repository.dart';
+import 'data/repositories/leads_repository.dart';
+import 'data/repositories/outreach_repository.dart';
+import 'data/repositories/revenue_repository.dart';
+import 'data/repositories/settings_repository.dart';
+import 'data/repositories/war_room_repository.dart';
+import 'providers/agent_lab_provider.dart';
+import 'providers/analytics_provider.dart';
+import 'providers/apollo_provider.dart';
+import 'providers/freelance_provider.dart';
+import 'providers/growth_provider.dart';
+import 'providers/leads_provider.dart';
+import 'providers/outreach_provider.dart';
+import 'providers/revenue_provider.dart';
+import 'providers/settings_provider.dart';
+import 'providers/voice_auth_controller.dart';
+import 'providers/war_room_provider.dart';
+import 'screens/auth/auth_gate.dart';
 import 'screens/war_room/war_room_screen.dart';
 import 'screens/apollo_hunter/apollo_hunter_screen.dart';
 import 'screens/freelance_radar/freelance_radar_screen.dart';
@@ -31,11 +56,49 @@ class CLAApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'AlphoTech CLA v2',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
-      home: const MainNavigationShell(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AppConfig()..load()),
+        // ApiClient reads AppConfig fresh on every request (see its interceptor),
+        // so one long-lived instance is correct — no need to rebuild it when
+        // the base URL/API key change in Settings.
+        Provider(create: (context) => ApiClient(context.read<AppConfig>())),
+        ChangeNotifierProvider(create: (_) => VoiceAuthController()),
+
+        // Repositories — thin typed wrappers over ApiClient, one per backend route group.
+        Provider(create: (context) => LeadsRepository(context.read<ApiClient>())),
+        Provider(create: (context) => WarRoomRepository(context.read<ApiClient>())),
+        Provider(create: (context) => ApolloRepository(context.read<ApiClient>())),
+        Provider(create: (context) => FreelanceRepository(context.read<ApiClient>())),
+        Provider(create: (context) => GrowthRepository(context.read<ApiClient>())),
+        Provider(create: (context) => AgentsRepository(context.read<ApiClient>())),
+        Provider(create: (context) => RevenueRepository(context.read<ApiClient>())),
+        Provider(create: (context) => AnalyticsRepository(context.read<ApiClient>())),
+        Provider(create: (context) => OutreachRepository(context.read<ApiClient>())),
+        Provider(create: (context) => SettingsRepository(context.read<ApiClient>())),
+
+        // Screen providers — hold loading/error/data state for each of the 9 screens.
+        ChangeNotifierProvider(create: (context) => LeadsProvider(context.read<LeadsRepository>())),
+        ChangeNotifierProvider(create: (context) => WarRoomProvider(
+              context.read<WarRoomRepository>(),
+              context.read<AnalyticsRepository>(),
+              context.read<GrowthRepository>(),
+            )),
+        ChangeNotifierProvider(create: (context) => ApolloProvider(context.read<ApolloRepository>(), context.read<LeadsRepository>())),
+        ChangeNotifierProvider(create: (context) => FreelanceProvider(context.read<FreelanceRepository>())),
+        ChangeNotifierProvider(create: (context) => GrowthProvider(context.read<GrowthRepository>())),
+        ChangeNotifierProvider(create: (context) => AgentLabProvider(context.read<AgentsRepository>())),
+        ChangeNotifierProvider(create: (context) => RevenueProvider(context.read<RevenueRepository>())),
+        ChangeNotifierProvider(create: (context) => AnalyticsProvider(context.read<AnalyticsRepository>())),
+        ChangeNotifierProvider(create: (context) => OutreachProvider(context.read<OutreachRepository>())),
+        ChangeNotifierProvider(create: (context) => SettingsProvider(context.read<SettingsRepository>())),
+      ],
+      child: MaterialApp(
+        title: 'AlphoTech CLA v2',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.lightTheme,
+        home: const AuthGate(child: MainNavigationShell()),
+      ),
     );
   }
 }

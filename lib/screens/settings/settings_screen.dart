@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../../core/config/app_config.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_shadows.dart';
+import '../../data/models/misc_models.dart';
+import '../../providers/settings_provider.dart';
+import '../../providers/voice_auth_controller.dart';
 import '../../widgets/shared_components.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -11,60 +16,85 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
+// Display metadata for each of the 17 platforms — keyed by the same names
+// config.integrationStatus() uses on the backend, so this stays in sync
+// with settings.js without needing its own source of truth for connectivity.
+class _IntegrationMeta {
+  final String label;
+  final String connectionMethod;
+  final IconData icon;
+  final Color color;
+  const _IntegrationMeta(this.label, this.connectionMethod, this.icon, this.color);
+}
+
+const Map<String, _IntegrationMeta> _integrationMeta = {
+  'apollo': _IntegrationMeta('Apollo.io', 'API Key', Icons.rocket_launch_rounded, AppColors.primary),
+  'umami': _IntegrationMeta('Umami', 'API Token + Site ID', Icons.analytics_rounded, AppColors.accent),
+  'sentry': _IntegrationMeta('Sentry', 'DSN + Auth Token', Icons.bug_report_rounded, AppColors.error),
+  'twitter': _IntegrationMeta('Twitter/X', 'OAuth 2.0', Icons.alternate_email_rounded, Color(0xFF1DA1F2)),
+  'trustmrr': _IntegrationMeta('TrustMRR', 'API Key', Icons.attach_money_rounded, AppColors.success),
+  'gumroad': _IntegrationMeta('Gumroad', 'Access Token', Icons.storefront_rounded, Color(0xFFFF90A4)),
+  'betalist': _IntegrationMeta('BetaList', 'RSS + Webhook', Icons.rocket_rounded, Color(0xFF7C4DFF)),
+  'solidgigs': _IntegrationMeta('SolidGigs', 'Email Parsing', Icons.work_rounded, AppColors.warning),
+  'contra': _IntegrationMeta('Contra', 'Email Parsing', Icons.business_center_rounded, AppColors.accent),
+  'agentscope': _IntegrationMeta('AgentScope', 'Cloud API', Icons.psychology_rounded, AppColors.primary),
+  'verdent': _IntegrationMeta('Verdent.ai', 'API Key', Icons.lightbulb_rounded, AppColors.warning),
+  'gro': _IntegrationMeta('Gro.app', 'Webhook Secret', Icons.account_tree_rounded, AppColors.accent),
+  'headai': _IntegrationMeta('HeadAI', 'API Key', Icons.smart_toy_rounded, Color(0xFF7C4DFF)),
+  'foundersDb': _IntegrationMeta('FoundersDB', 'Scrape + Import', Icons.auto_awesome_rounded, AppColors.warning),
+  'webrobots': _IntegrationMeta('WebRobots', 'API Key', Icons.precision_manufacturing_rounded, AppColors.textSecondary),
+  'startupsRip': _IntegrationMeta('Startups.rip', 'RSS Feed', Icons.trending_down_rounded, AppColors.error),
+  'paperclip': _IntegrationMeta('Paperclip', 'TBD', Icons.attachment_rounded, AppColors.textTertiary),
+  'supabase': _IntegrationMeta('Supabase', 'Project URL + Key', Icons.storage_rounded, AppColors.success),
+  'openai': _IntegrationMeta('OpenAI', 'API Key', Icons.auto_awesome_rounded, Color(0xFF10A37F)),
+  'smtp': _IntegrationMeta('Email Alerts', 'SMTP', Icons.mail_rounded, AppColors.info),
+};
+
 class _SettingsScreenState extends State<SettingsScreen> {
-  final Map<String, bool> _integrationStatus = {
-    'Apollo.io': true,
-    'Umami': true,
-    'Sentry': true,
-    'Twitter/X': true,
-    'TrustMRR': false,
-    'Gumroad': true,
-    'BetaList': false,
-    'SolidGigs': true,
-    'Contra': true,
-    'AgentScope': true,
-    'Verdent.ai': false,
-    'Gro.app': false,
-    'HeadAI': false,
-    'FoundersDB': true,
-    'WebRobots': false,
-    'Startups.rip': true,
-    'Paperclip': false,
-  };
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => context.read<SettingsProvider>().load());
+  }
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<SettingsProvider>();
     return Scaffold(
       backgroundColor: AppColors.scaffoldBg,
-      body: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildHeader(),
-            const SizedBox(height: 8),
-            _buildConnectionSummary(),
-            const SizedBox(height: 4),
-            const SectionHeader(title: 'Platform Integrations'),
-            _buildIntegrationsList(),
-            const SizedBox(height: 8),
-            const SectionHeader(title: 'App Settings'),
-            _buildAppSettings(),
-            const SizedBox(height: 24),
-          ],
+      body: RefreshIndicator(
+        onRefresh: () => context.read<SettingsProvider>().load(),
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildHeader(provider),
+              const SizedBox(height: 8),
+              _buildConnectionSummary(provider),
+              const SizedBox(height: 4),
+              const SectionHeader(title: 'Backend Connection'),
+              _buildBackendConfig(context),
+              const SizedBox(height: 8),
+              const SectionHeader(title: 'Platform Integrations'),
+              _buildIntegrationsList(provider),
+              const SizedBox(height: 8),
+              const SectionHeader(title: 'App Settings'),
+              _buildAppSettings(),
+              const SizedBox(height: 24),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(SettingsProvider provider) {
     return Container(
       width: double.infinity,
       decoration: const BoxDecoration(
         gradient: AppColors.headerGradient,
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(28),
-          bottomRight: Radius.circular(28),
-        ),
+        borderRadius: BorderRadius.only(bottomLeft: Radius.circular(28), bottomRight: Radius.circular(28)),
       ),
       child: SafeArea(
         bottom: false,
@@ -77,26 +107,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Container(
                     padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)),
                     child: const Icon(Icons.settings_rounded, color: Colors.white, size: 22),
                   ),
                   const SizedBox(width: 12),
-                  Expanded(
-                    child: Text('Settings & Integrations',
-                        style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white)),
-                  ),
+                  Expanded(child: Text('Settings & Integrations', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white))),
                 ],
               ),
               const SizedBox(height: 16),
               Row(
                 children: [
-                  _quickStat('Connected', '${_integrationStatus.values.where((v) => v).length}'),
-                  _quickStat('Available', '${_integrationStatus.length}'),
-                  _quickStat('Data Points', '1,247'),
-                  _quickStat('Last Sync', '2m ago'),
+                  _quickStat('Connected', '${provider.connectedCount}'),
+                  _quickStat('Available', '${provider.integrations.length}'),
                 ],
               ),
             ],
@@ -116,34 +138,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       );
 
-  Widget _buildConnectionSummary() {
-    final connected = _integrationStatus.values.where((v) => v).length;
-    final total = _integrationStatus.length;
+  Widget _buildConnectionSummary(SettingsProvider provider) {
+    final connected = provider.connectedCount;
+    final total = provider.integrations.length;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
         padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.cardBg,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: AppShadows.cardShadow,
-        ),
+        decoration: BoxDecoration(color: AppColors.cardBg, borderRadius: BorderRadius.circular(16), boxShadow: AppShadows.cardShadow),
         child: Column(
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Integration Health',
-                    style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                Text('$connected / $total',
-                    style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.primary)),
+                Text('Integration Health', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                Text(total == 0 ? '—' : '$connected / $total', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.primary)),
               ],
             ),
             const SizedBox(height: 10),
             ClipRRect(
               borderRadius: BorderRadius.circular(6),
               child: LinearProgressIndicator(
-                value: connected / total,
+                value: total == 0 ? 0 : connected / total,
                 minHeight: 8,
                 backgroundColor: AppColors.surfaceBg,
                 valueColor: const AlwaysStoppedAnimation<Color>(AppColors.accent),
@@ -151,7 +167,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              '${total - connected} integrations available to connect',
+              total == 0 ? 'Pull to refresh once the backend is reachable.' : '${total - connected} integrations available to connect',
               style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary),
             ),
           ],
@@ -160,76 +176,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildIntegrationsList() {
-    final integrations = [
-      _IntegrationData('Apollo.io', 'API Key', Icons.rocket_launch_rounded, AppColors.primary, '2m ago', 342),
-      _IntegrationData('Umami', 'API Token + Site ID', Icons.analytics_rounded, AppColors.accent, '5m ago', 543),
-      _IntegrationData('Sentry', 'DSN + Auth Token', Icons.bug_report_rounded, AppColors.error, '1m ago', 48),
-      _IntegrationData('Twitter/X', 'OAuth 2.0', Icons.alternate_email_rounded, const Color(0xFF1DA1F2), '3m ago', 1247),
-      _IntegrationData('TrustMRR', 'API Key', Icons.attach_money_rounded, AppColors.success, 'Never', 0),
-      _IntegrationData('Gumroad', 'OAuth', Icons.storefront_rounded, const Color(0xFFFF90A4), '10m ago', 156),
-      _IntegrationData('BetaList', 'RSS + Webhook', Icons.rocket_rounded, const Color(0xFF7C4DFF), 'Never', 0),
-      _IntegrationData('SolidGigs', 'Email Parsing', Icons.work_rounded, AppColors.warning, '6h ago', 28),
-      _IntegrationData('Contra', 'Email Parsing', Icons.business_center_rounded, AppColors.accent, '4h ago', 12),
-      _IntegrationData('AgentScope', 'Cloud API', Icons.psychology_rounded, AppColors.primary, '1m ago', 89),
-      _IntegrationData('Verdent.ai', 'API Key', Icons.lightbulb_rounded, AppColors.warning, 'Never', 0),
-      _IntegrationData('Gro.app', 'Webhook', Icons.account_tree_rounded, AppColors.accent, 'Never', 0),
-      _IntegrationData('HeadAI', 'API Key', Icons.smart_toy_rounded, const Color(0xFF7C4DFF), 'Never', 0),
-      _IntegrationData('FoundersDB', 'Scrape + Import', Icons.auto_awesome_rounded, AppColors.warning, '1d ago', 67),
-      _IntegrationData('WebRobots', 'API Key', Icons.precision_manufacturing_rounded, AppColors.textSecondary, 'Never', 0),
-      _IntegrationData('Startups.rip', 'RSS Feed', Icons.trending_down_rounded, AppColors.error, '12h ago', 15),
-      _IntegrationData('Paperclip', 'TBD', Icons.attachment_rounded, AppColors.textTertiary, 'Never', 0),
-    ];
+  Widget _buildBackendConfig(BuildContext context) {
+    return AppCard(
+      child: _BackendConfigForm(),
+    );
+  }
 
+  Widget _buildIntegrationsList(SettingsProvider provider) {
+    if (provider.isLoading && provider.integrations.isEmpty) {
+      return const Padding(padding: EdgeInsets.symmetric(vertical: 24), child: Center(child: CircularProgressIndicator()));
+    }
+    if (provider.hasError && provider.integrations.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Text(provider.error ?? 'Could not load integrations', style: GoogleFonts.inter(fontSize: 12, color: AppColors.error)),
+      );
+    }
     return Column(
-      children: integrations.map((i) {
-        final isConnected = _integrationStatus[i.name] ?? false;
+      children: provider.integrations.map((IntegrationStatus i) {
+        final meta = _integrationMeta[i.name] ?? _IntegrationMeta(i.name, '—', Icons.extension_rounded, AppColors.textTertiary);
         return AppCard(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          onTap: () {},
           child: Row(
             children: [
               Container(
                 width: 44,
                 height: 44,
-                decoration: BoxDecoration(
-                  color: i.color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(i.icon, color: i.color, size: 22),
+                decoration: BoxDecoration(color: meta.color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
+                child: Icon(meta.icon, color: meta.color, size: 22),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(i.name,
-                        style: GoogleFonts.inter(
-                            fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    Text(meta.label, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                     const SizedBox(height: 2),
-                    Text(
-                      isConnected
-                          ? 'Last sync: ${i.lastSync} · ${i.dataPoints} data points'
-                          : i.connectionMethod,
-                      style: GoogleFonts.inter(
-                        fontSize: 11,
-                        color: isConnected ? AppColors.textTertiary : AppColors.textTertiary,
-                      ),
-                    ),
+                    Text(meta.connectionMethod, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textTertiary)),
                   ],
                 ),
               ),
-              Transform.scale(
-                scale: 0.8,
-                child: Switch(
-                  value: isConnected,
-                  onChanged: (val) => setState(() => _integrationStatus[i.name] = val),
-                  activeThumbColor: AppColors.accent,
-                  activeTrackColor: AppColors.accent.withValues(alpha: 0.3),
-                  inactiveThumbColor: AppColors.textTertiary,
-                  inactiveTrackColor: AppColors.border,
-                ),
-              ),
+              i.connected ? StatusBadge.connected() : StatusBadge.pending(),
             ],
           ),
         );
@@ -238,33 +225,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _buildAppSettings() {
-    return Column(
-      children: [
-        _settingsItem(Icons.person_rounded, 'Account', 'Prince Adigwe • AlphoTech'),
-        _settingsItem(Icons.notifications_rounded, 'Notifications', 'Push · Email · SMS'),
-        _settingsItem(Icons.schedule_rounded, 'War Room Schedule', 'Daily brief at 7:00 AM'),
-        _settingsItem(Icons.language_rounded, 'Target Markets', 'US · UK · EU'),
-        _settingsItem(Icons.storage_rounded, 'Data & Storage', '2.4 GB used'),
-        _settingsItem(Icons.security_rounded, 'Security', 'Biometric lock enabled'),
-        _settingsItem(Icons.info_outline_rounded, 'About CLA v2', 'Version 2.0.0'),
-      ],
-    );
+    return Builder(builder: (context) {
+      final auth = context.watch<VoiceAuthController>();
+      return Column(
+        children: [
+          _settingsItem(Icons.person_rounded, 'Account', 'Prince Adigwe • AlphoTech'),
+          _settingsItem(
+            Icons.mic_rounded,
+            'Voice Lock',
+            auth.hasPassphrase ? 'Voice passphrase set • tap to re-record' : 'Not set up yet',
+            onTap: () => auth.resetPassphrase(),
+          ),
+          _settingsItem(
+            Icons.lock_rounded,
+            'Lock CLA now',
+            'Require your voice passphrase again',
+            onTap: () => context.read<VoiceAuthController>().lock(),
+          ),
+          _settingsItem(Icons.info_outline_rounded, 'About CLA v2', 'Version 2.0.0'),
+        ],
+      );
+    });
   }
 
-  Widget _settingsItem(IconData icon, String title, String subtitle) {
+  Widget _settingsItem(IconData icon, String title, String subtitle, {VoidCallback? onTap}) {
     return AppCard(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      onTap: () {},
+      onTap: onTap ?? () {},
       child: Row(
         children: [
           Container(
             width: 38,
             height: 38,
-            decoration: BoxDecoration(
-              color: AppColors.primaryLight.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(10),
-            ),
+            decoration: BoxDecoration(color: AppColors.primaryLight.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
             child: Icon(icon, color: AppColors.primary, size: 18),
           ),
           const SizedBox(width: 12),
@@ -272,10 +266,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title,
-                    style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                Text(subtitle,
-                    style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary)),
+                Text(title, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                Text(subtitle, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary)),
               ],
             ),
           ),
@@ -286,11 +278,77 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
-class _IntegrationData {
-  final String name, connectionMethod;
-  final IconData icon;
-  final Color color;
-  final String lastSync;
-  final int dataPoints;
-  _IntegrationData(this.name, this.connectionMethod, this.icon, this.color, this.lastSync, this.dataPoints);
+/// Lets the app point at a different backend (e.g. a phone testing against a
+/// laptop's IP, or a deployed instance) without a rebuild — reads/writes
+/// [AppConfig], which every API call already goes through.
+class _BackendConfigForm extends StatefulWidget {
+  @override
+  State<_BackendConfigForm> createState() => _BackendConfigFormState();
+}
+
+class _BackendConfigFormState extends State<_BackendConfigForm> {
+  late final TextEditingController _urlController;
+  late final TextEditingController _keyController;
+  bool _initialized = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final config = context.watch<AppConfig>();
+    if (!_initialized && config.loaded) {
+      _urlController = TextEditingController(text: config.baseUrl);
+      _keyController = TextEditingController(text: config.apiKey);
+      _initialized = true;
+    }
+    if (!_initialized) {
+      return const SizedBox(height: 40, child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Backend URL', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+        const SizedBox(height: 6),
+        _field(_urlController, 'http://localhost:8080'),
+        const SizedBox(height: 4),
+        Text(
+          'On a physical device, use your computer\'s LAN IP instead of localhost (e.g. http://192.168.1.20:8080).',
+          style: GoogleFonts.inter(fontSize: 11, color: AppColors.textTertiary, height: 1.4),
+        ),
+        const SizedBox(height: 14),
+        Text('API Key (optional)', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+        const SizedBox(height: 6),
+        _field(_keyController, 'Leave blank if CLA_API_KEY is unset'),
+        const SizedBox(height: 14),
+        AccentButton(
+          label: 'Save & Reconnect',
+          icon: Icons.save_rounded,
+          onPressed: () async {
+            await context.read<AppConfig>().update(baseUrl: _urlController.text, apiKey: _keyController.text);
+            if (context.mounted) {
+              await context.read<SettingsProvider>().load();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Backend connection updated')));
+              }
+            }
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _field(TextEditingController controller, String hint) {
+    return Container(
+      decoration: BoxDecoration(color: AppColors.surfaceBg, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+      child: TextField(
+        controller: controller,
+        style: GoogleFonts.inter(fontSize: 13, color: AppColors.textPrimary),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        ),
+      ),
+    );
+  }
 }

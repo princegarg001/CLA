@@ -1,37 +1,51 @@
-CLA v2 Backend
+# CLA v2 Backend
 
-This is a lightweight Node.js/Express backend scaffold for the CLA v2 Flutter app. It provides a single place to configure external API keys and exposes simple proxy-style endpoints and stubs you can fill in.
+The full Node.js/Express backend for AlphoTech CLA v2 — the acquisition OS behind the
+9-screen Flutter app. Every route works out of the box with realistic sample data;
+wiring in real API keys switches each integration to live calls one at a time.
 
-Where to put API keys
-- Copy `backend/.env.example` to `backend/.env` and fill in the secrets.
-
-Quick start (requires Node.js 18+)
+## Quick start (Node.js 18+)
 
 ```powershell
 cd backend
 npm install
-npm run dev    # or `npm start` in production
+copy .env.example .env    # then fill in whatever keys you have
+npm run dev                # nodemon, reloads on change
 ```
 
-Base URL
-- Default: `http://localhost:8080`
-- Update Flutter app to point API calls to this base URL.
+Server listens on `http://localhost:8080` by default (`PORT` in `.env`).
 
-What I created
-- `src/index.js` — server bootstrap
-- `src/config.js` — loads env variables
-- `src/db.js` — simple local JSON DB for leads (fallback to Supabase if configured)
-- `src/routes/api.js` — all API routes (leads, apollo, umami, sentry, twitter, gumroad, solidgigs, contra, trustmrr, agentscope, verdent, gro, headai, webrobots, startupsRip, betalist, email inbound)
-- `src/services/*` — service stubs that proxy to real APIs when keys are present, otherwise return sample data
+## Database
 
-Next steps
-1. Fill `backend/.env` with your API keys/URLs.
-2. Run `npm install` and `npm run dev`.
-3. Update the Flutter app to call e.g. `${BASE_URL}/api/...`.
+Uses Supabase when `SUPABASE_URL` + `SUPABASE_KEY` are set — run `supabase_schema.sql`
+in your project's SQL editor first (Database → SQL Editor → New query). Without those
+keys, everything falls back to a local JSON store at `data/db.json` — no setup required.
 
-Notes
-- Some integrations (SolidGigs/Contra) rely on inbound email parsing — see the `POST /api/email/inbound` endpoint to forward incoming emails (or use a mail-forwarding service).
-- Webhooks: `POST /api/gro/webhook` is present to receive Gro.app webhook events; protect it with `GRO_WEBHOOK_SECRET`.
-- If you want Supabase instead of local storage, set `SUPABASE_URL` and `SUPABASE_KEY` in `.env` and the server will attempt to use Supabase for leads.
+## Structure
 
-If you want, I can now: wire the Flutter app to call these endpoints, or expand any service to fully match a provider's API (requires provider docs/keys)."}
+- `src/index.js` — server bootstrap, middleware, route mounting, graceful shutdown
+- `src/config.js` — every env var + `isConfigured('name')` / `integrationStatus()`
+- `src/db.js` — Supabase client or JSON-file driver behind one shared interface
+- `src/middleware/` — error handling, rate limiting, `X-API-Key` auth
+- `src/routes/` — one file per screen/domain (leads, apollo, umami, sentry, twitter,
+  gumroad, freelance, revenue, agents, outreach, settings, warRoom, webhooks, intelligence)
+- `src/services/` — one file per external platform; each degrades to sample data when
+  its key is unset
+- `src/cron/` — scheduled automation (War Room brief, job/RSS fetch, lead re-scoring,
+  weekly report) — set `CRON_ENABLED=true` to turn it on
+
+## Auth
+
+If `CLA_API_KEY` is set, every `/api/*` route (except `/api/webhooks/*`, which use their
+own per-provider secrets) requires header `X-API-Key: <value>`. Leave it blank while
+developing locally to skip the check.
+
+## Verifying it's alive
+
+```powershell
+curl http://localhost:8080/health
+curl http://localhost:8080/api/warroom/missions
+curl http://localhost:8080/api/settings/integrations
+```
+
+Every route returns valid JSON with sample data until you add the matching key in `.env`.

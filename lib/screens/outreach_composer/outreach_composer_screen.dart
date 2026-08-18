@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import '../../core/theme/app_colors.dart';
-import '../../core/theme/app_shadows.dart';
+import '../../data/models/outreach_models.dart';
+import '../../providers/leads_provider.dart';
+import '../../providers/outreach_provider.dart';
 import '../../widgets/shared_components.dart';
 
 class OutreachComposerScreen extends StatefulWidget {
@@ -13,30 +16,34 @@ class OutreachComposerScreen extends StatefulWidget {
 
 class _OutreachComposerScreenState extends State<OutreachComposerScreen> {
   int _selectedTab = 0;
-  String _selectedTone = 'Technical';
-  String _selectedMarket = 'US';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<OutreachProvider>().load();
+      context.read<LeadsProvider>().load();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<OutreachProvider>();
     return Scaffold(
       backgroundColor: AppColors.scaffoldBg,
       body: Column(
         children: [
-          _buildHeader(),
+          _buildHeader(provider),
           const SizedBox(height: 4),
-          AppTabBar(
-            tabs: const ['Inbox', 'Compose', 'Templates'],
-            selectedIndex: _selectedTab,
-            onTap: (i) => setState(() => _selectedTab = i),
-          ),
+          AppTabBar(tabs: const ['Inbox', 'Compose', 'Templates'], selectedIndex: _selectedTab, onTap: (i) => setState(() => _selectedTab = i)),
           const SizedBox(height: 8),
           Expanded(
             child: IndexedStack(
               index: _selectedTab,
               children: [
-                _buildInboxTab(),
-                _buildComposeTab(),
-                _buildTemplatesTab(),
+                _buildInboxTab(provider),
+                const _ComposeTab(),
+                _buildTemplatesTab(provider),
               ],
             ),
           ),
@@ -45,15 +52,17 @@ class _OutreachComposerScreenState extends State<OutreachComposerScreen> {
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(OutreachProvider provider) {
+    final sent = provider.inbox.where((m) => m.status == 'sent' || m.status == 'replied').length;
+    final replied = provider.inbox.where((m) => m.status == 'replied').length;
+    final drafts = provider.inbox.where((m) => m.status == 'draft').length;
+    final rate = sent == 0 ? 0 : (replied / sent * 100).round();
+
     return Container(
       width: double.infinity,
       decoration: const BoxDecoration(
         gradient: AppColors.headerGradient,
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(28),
-          bottomRight: Radius.circular(28),
-        ),
+        borderRadius: BorderRadius.only(bottomLeft: Radius.circular(28), bottomRight: Radius.circular(28)),
       ),
       child: SafeArea(
         bottom: false,
@@ -66,27 +75,21 @@ class _OutreachComposerScreenState extends State<OutreachComposerScreen> {
                 children: [
                   Container(
                     padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)),
                     child: const Icon(Icons.edit_note_rounded, color: Colors.white, size: 22),
                   ),
                   const SizedBox(width: 12),
-                  Expanded(
-                    child: Text('Outreach Composer',
-                        style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white)),
-                  ),
-                  _headerAction(Icons.search_rounded),
+                  Expanded(child: Text('Outreach Composer', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white))),
+                  GestureDetector(onTap: () => context.read<OutreachProvider>().load(), child: _headerAction(Icons.refresh_rounded)),
                 ],
               ),
               const SizedBox(height: 16),
               Row(
                 children: [
-                  _quickStat('Drafts', '4'),
-                  _quickStat('Sent', '28'),
-                  _quickStat('Replies', '7'),
-                  _quickStat('Rate', '25%'),
+                  _quickStat('Drafts', '$drafts'),
+                  _quickStat('Sent', '$sent'),
+                  _quickStat('Replies', '$replied'),
+                  _quickStat('Rate', '$rate%'),
                 ],
               ),
             ],
@@ -112,94 +115,121 @@ class _OutreachComposerScreenState extends State<OutreachComposerScreen> {
         ),
       );
 
-  Widget _buildInboxTab() {
-    final messages = [
-      _MessageData('Apollo Email', 'David Chen — Finova Technologies', 'Re: Backend infrastructure for your fintech platform', '12m ago', 'replied', Icons.email_rounded, AppColors.primary),
-      _MessageData('Twitter DM', '@sarahbuilds', 'Hey! Saw your thread on microservices. We might need help...', '45m ago', 'new', Icons.alternate_email_rounded, const Color(0xFF1DA1F2)),
-      _MessageData('Contra', 'SaaS Backend Project', 'Your proposal has been viewed by the client', '2h ago', 'viewed', Icons.work_rounded, AppColors.accent),
-      _MessageData('SolidGigs', 'HealthTech API Application', 'Application submitted — awaiting response', '4h ago', 'sent', Icons.send_rounded, const Color(0xFF7C4DFF)),
-      _MessageData('Contact Form', 'James Cooper — PayRight', 'Hi, I found your website and I\'m interested in...', '6h ago', 'new', Icons.contact_mail_rounded, AppColors.warning),
-      _MessageData('Apollo Email', 'Sarah Williams — BuildFast', 'Follow-up: Discovery call this Thursday?', '1d ago', 'sent', Icons.email_rounded, AppColors.primary),
-      _MessageData('WhatsApp', 'Priya Sharma — CloudScale', 'Thanks for the proposal. Let me discuss with my team...', '1d ago', 'replied', Icons.chat_rounded, AppColors.success),
-    ];
+  Widget _buildInboxTab(OutreachProvider provider) {
+    if (provider.isLoading && provider.inbox.isEmpty) return const Center(child: CircularProgressIndicator());
+    if (provider.inbox.isEmpty) {
+      return Center(child: Text('No messages yet — compose one to get started.', style: GoogleFonts.inter(color: AppColors.textTertiary)));
+    }
+    return RefreshIndicator(
+      onRefresh: () => context.read<OutreachProvider>().load(),
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        itemCount: provider.inbox.length,
+        itemBuilder: (context, index) => _messageCard(provider.inbox[index]),
+      ),
+    );
+  }
 
+  Widget _messageCard(OutreachMessage m) {
+    final visual = _channelVisual(m.channel);
+    return AppCard(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(color: visual.$2.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
+            child: Icon(visual.$1, color: visual.$2, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(color: visual.$2.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
+                      child: Text(_channelLabel(m.channel), style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: visual.$2)),
+                    ),
+                    const Spacer(),
+                    if (m.createdAt != null) Text(_relativeTime(m.createdAt!), style: GoogleFonts.inter(fontSize: 11, color: AppColors.textTertiary)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(m.body, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary), maxLines: 2, overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          StatusBadge(
+            label: m.status[0].toUpperCase() + m.status.substring(1),
+            bgColor: m.status == 'replied' ? AppColors.successLight : m.status == 'sent' ? AppColors.infoLight : AppColors.surfaceBg,
+            textColor: m.status == 'replied' ? AppColors.success : m.status == 'sent' ? AppColors.info : AppColors.textTertiary,
+          ),
+        ],
+      ),
+    );
+  }
+
+  (IconData, Color) _channelVisual(String channel) {
+    switch (channel) {
+      case 'twitter_dm':
+        return (Icons.alternate_email_rounded, const Color(0xFF1DA1F2));
+      case 'contra':
+        return (Icons.work_rounded, AppColors.accent);
+      case 'solidgigs':
+        return (Icons.send_rounded, const Color(0xFF7C4DFF));
+      case 'contact_form':
+        return (Icons.contact_mail_rounded, AppColors.warning);
+      case 'whatsapp':
+        return (Icons.chat_rounded, AppColors.success);
+      default:
+        return (Icons.email_rounded, AppColors.primary);
+    }
+  }
+
+  String _channelLabel(String channel) => channel.split('_').map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}').join(' ');
+
+  String _relativeTime(DateTime time) {
+    final diff = DateTime.now().difference(time);
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
+  Widget _buildTemplatesTab(OutreachProvider provider) {
+    if (provider.templates.isEmpty) {
+      return Center(child: Text('No templates saved yet.', style: GoogleFonts.inter(color: AppColors.textTertiary)));
+    }
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      itemCount: messages.length,
+      itemCount: provider.templates.length,
       itemBuilder: (context, index) {
-        final m = messages[index];
+        final t = provider.templates[index];
         return AppCard(
-          margin: const EdgeInsets.only(bottom: 8),
-          onTap: () {},
+          margin: const EdgeInsets.only(bottom: 10),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: m.color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(m.icon, color: m.color, size: 20),
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
+                child: const Icon(Icons.description_rounded, color: AppColors.primary, size: 22),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: m.color.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(m.channel,
-                              style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: m.color)),
-                        ),
-                        const Spacer(),
-                        Text(m.time,
-                            style: GoogleFonts.inter(fontSize: 11, color: AppColors.textTertiary)),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(m.sender,
-                        style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    Text(t.name, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                     const SizedBox(height: 2),
-                    Text(m.preview,
-                        style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
+                    Text('${t.market ?? 'All markets'} • ${t.tone ?? 'Any tone'}', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary)),
                   ],
                 ),
-              ),
-              const SizedBox(width: 8),
-              Column(
-                children: [
-                  const SizedBox(height: 18),
-                  if (m.status == 'new')
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: const BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
-                    )
-                  else
-                    StatusBadge(
-                      label: m.status[0].toUpperCase() + m.status.substring(1),
-                      bgColor: m.status == 'replied'
-                          ? AppColors.successLight
-                          : m.status == 'viewed'
-                              ? AppColors.warningLight
-                              : AppColors.surfaceBg,
-                      textColor: m.status == 'replied'
-                          ? AppColors.success
-                          : m.status == 'viewed'
-                              ? AppColors.warning
-                              : AppColors.textTertiary,
-                    ),
-                ],
               ),
             ],
           ),
@@ -207,125 +237,152 @@ class _OutreachComposerScreenState extends State<OutreachComposerScreen> {
       },
     );
   }
+}
 
-  Widget _buildComposeTab() {
+class _ComposeTab extends StatefulWidget {
+  const _ComposeTab();
+
+  @override
+  State<_ComposeTab> createState() => _ComposeTabState();
+}
+
+class _ComposeTabState extends State<_ComposeTab> {
+  String _selectedTone = 'founder_to_founder';
+  String _selectedMarket = 'US';
+  String _selectedChannel = 'apollo_email';
+  String? _selectedLeadId;
+  final _bodyController = TextEditingController();
+
+  static const _tones = {'Technical': 'technical', 'Casual': 'casual', 'Formal': 'formal', 'Founder-to-founder': 'founder_to_founder'};
+  static const _channels = {'Apollo Email': 'apollo_email', 'Twitter DM': 'twitter_dm', 'Contra': 'contra', 'SolidGigs': 'solidgigs'};
+
+  @override
+  void dispose() {
+    _bodyController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _generate() async {
+    if (_selectedLeadId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pick a lead first')));
+      return;
+    }
+    final provider = context.read<OutreachProvider>();
+    final ok = await provider.generate(leadId: _selectedLeadId!, tone: _selectedTone, market: _selectedMarket, channel: _selectedChannel);
+    if (ok && provider.draft != null) {
+      _bodyController.text = provider.draft!.body;
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(provider.error ?? 'Could not generate a draft')));
+    }
+  }
+
+  Future<void> _send() async {
+    final provider = context.read<OutreachProvider>();
+    if (provider.draft == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Generate a draft first')));
+      return;
+    }
+    final ok = await provider.send(provider.draft!.id);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'Sent' : (provider.error ?? 'Failed to send'))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final leads = context.watch<LeadsProvider>().leads;
+    final outreach = context.watch<OutreachProvider>();
+
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // To field
           AppCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('New Message',
-                    style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                Text('New Message', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
                 const SizedBox(height: 16),
-                _inputField('To', 'Search leads or enter email...'),
-                const SizedBox(height: 12),
-                _inputField('Subject', 'Enter subject line...'),
+                Text('To', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+                const SizedBox(height: 6),
+                Container(
+                  decoration: BoxDecoration(color: AppColors.surfaceBg, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      isExpanded: true,
+                      value: _selectedLeadId,
+                      hint: Text('Select a lead…', style: GoogleFonts.inter(fontSize: 13, color: AppColors.textTertiary)),
+                      items: leads
+                          .map((l) => DropdownMenuItem(value: l.id, child: Text(l.displayName, style: GoogleFonts.inter(fontSize: 13))))
+                          .toList(),
+                      onChanged: (v) => setState(() => _selectedLeadId = v),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 16),
-                // Tone selector
-                Text('Tone', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+                Text('Channel', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
-                  children: ['Technical', 'Casual', 'Formal', 'Founder-to-founder'].map((tone) {
-                    final isSelected = tone == _selectedTone;
+                  children: _channels.entries.map((e) {
+                    final isSelected = e.value == _selectedChannel;
                     return GestureDetector(
-                      onTap: () => setState(() => _selectedTone = tone),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: isSelected ? AppColors.primary.withValues(alpha: 0.1) : AppColors.surfaceBg,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: isSelected ? AppColors.primary : AppColors.border,
-                            width: isSelected ? 1.5 : 1,
-                          ),
-                        ),
-                        child: Text(tone,
-                            style: GoogleFonts.inter(
-                              fontSize: 12,
-                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                              color: isSelected ? AppColors.primary : AppColors.textSecondary,
-                            )),
-                      ),
+                      onTap: () => setState(() => _selectedChannel = e.value),
+                      child: _chip(e.key, isSelected, AppColors.accent),
                     );
                   }).toList(),
                 ),
                 const SizedBox(height: 16),
-                // Market selector
-                Text('Target Market',
-                    style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+                Text('Tone', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: _tones.entries.map((e) {
+                    final isSelected = e.value == _selectedTone;
+                    return GestureDetector(onTap: () => setState(() => _selectedTone = e.value), child: _chip(e.key, isSelected, AppColors.primary));
+                  }).toList(),
+                ),
+                const SizedBox(height: 16),
+                Text('Target Market', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
                 const SizedBox(height: 8),
                 Row(
                   children: ['US', 'UK', 'EU'].map((market) {
                     final isSelected = market == _selectedMarket;
                     return Padding(
                       padding: const EdgeInsets.only(right: 8),
-                      child: GestureDetector(
-                        onTap: () => setState(() => _selectedMarket = market),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: isSelected ? AppColors.accent.withValues(alpha: 0.1) : AppColors.surfaceBg,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: isSelected ? AppColors.accent : AppColors.border,
-                              width: isSelected ? 1.5 : 1,
-                            ),
-                          ),
-                          child: Text(market,
-                              style: GoogleFonts.inter(
-                                fontSize: 12,
-                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                                color: isSelected ? AppColors.accent : AppColors.textSecondary,
-                              )),
-                        ),
-                      ),
+                      child: GestureDetector(onTap: () => setState(() => _selectedMarket = market), child: _chip(market, isSelected, AppColors.accent)),
                     );
                   }).toList(),
                 ),
                 const SizedBox(height: 16),
-                // Message body
                 Container(
                   height: 160,
                   padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceBg,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.border),
-                  ),
+                  decoration: BoxDecoration(color: AppColors.surfaceBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
                   child: TextField(
+                    controller: _bodyController,
                     maxLines: null,
                     expands: true,
                     style: GoogleFonts.inter(fontSize: 14, color: AppColors.textPrimary),
                     decoration: InputDecoration.collapsed(
-                      hintText: 'Write your message or tap AI Generate...',
+                      hintText: 'Write your message or tap AI Generate…',
                       hintStyle: GoogleFonts.inter(fontSize: 14, color: AppColors.textTertiary),
                     ),
                   ),
                 ),
                 const SizedBox(height: 16),
-                // Action buttons
                 Row(
                   children: [
                     Expanded(
                       child: SizedBox(
                         height: 46,
                         child: ElevatedButton.icon(
-                          onPressed: () {},
+                          onPressed: outreach.isLoading ? null : _generate,
                           icon: const Icon(Icons.auto_awesome_rounded, size: 18),
-                          label: Text('AI Generate',
-                              style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.accent,
-                            foregroundColor: Colors.white,
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
+                          label: Text('AI Generate', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600)),
+                          style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: Colors.white, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                         ),
                       ),
                     ),
@@ -333,93 +390,13 @@ class _OutreachComposerScreenState extends State<OutreachComposerScreen> {
                     SizedBox(
                       height: 46,
                       child: ElevatedButton.icon(
-                        onPressed: () {},
+                        onPressed: _send,
                         icon: const Icon(Icons.send_rounded, size: 18),
                         label: Text('Send', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
+                        style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                       ),
                     ),
                   ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          // Personalisation tokens
-          AppCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Personalisation Tokens',
-                    style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                const SizedBox(height: 4),
-                Text('Auto-inserted when a lead is selected',
-                    style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary)),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    '{company_name}',
-                    '{founder_name}',
-                    '{funding_round}',
-                    '{tech_stack}',
-                    '{job_posting}',
-                    '{pain_point}',
-                  ]
-                      .map((token) => Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: AppColors.primaryLight.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: AppColors.primaryLight.withValues(alpha: 0.3)),
-                            ),
-                            child: Text(token,
-                                style: GoogleFonts.inter(
-                                    fontSize: 11, fontWeight: FontWeight.w500, color: AppColors.primary)),
-                          ))
-                      .toList(),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          // A/B testing
-          AppCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF7C4DFF).withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(Icons.compare_arrows_rounded, color: Color(0xFF7C4DFF), size: 18),
-                    ),
-                    const SizedBox(width: 10),
-                    Text('A/B Testing',
-                        style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Send two message versions to similar leads. Track which gets more replies.',
-                  style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary),
-                ),
-                const SizedBox(height: 12),
-                OutlinedAccentButton(
-                  label: 'Create A/B Test',
-                  onPressed: () {},
-                  icon: Icons.science_rounded,
-                  color: const Color(0xFF7C4DFF),
                 ),
               ],
             ),
@@ -430,95 +407,15 @@ class _OutreachComposerScreenState extends State<OutreachComposerScreen> {
     );
   }
 
-  Widget _inputField(String label, String hint) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-        const SizedBox(height: 6),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            color: AppColors.surfaceBg,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(hint, style: GoogleFonts.inter(fontSize: 13, color: AppColors.textTertiary)),
-              ),
-            ],
-          ),
-        ),
-      ],
+  Widget _chip(String label, bool isSelected, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: isSelected ? color.withValues(alpha: 0.1) : AppColors.surfaceBg,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: isSelected ? color : AppColors.border, width: isSelected ? 1.5 : 1),
+      ),
+      child: Text(label, style: GoogleFonts.inter(fontSize: 12, fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400, color: isSelected ? color : AppColors.textSecondary)),
     );
   }
-
-  Widget _buildTemplatesTab() {
-    final templates = [
-      _TemplateData('Cold Outreach — ROI Focus', 'US market • Technical tone', Icons.trending_up_rounded, AppColors.primary, '42% open · 12% reply'),
-      _TemplateData('Cold Outreach — Pain Point', 'US/UK market • Casual tone', Icons.psychology_rounded, AppColors.accent, '38% open · 15% reply'),
-      _TemplateData('Follow-up — Value Add', 'All markets • Formal tone', Icons.volunteer_activism_rounded, const Color(0xFF7C4DFF), '55% open · 22% reply'),
-      _TemplateData('Follow-up — Social Proof', 'UK market • Founder tone', Icons.groups_rounded, AppColors.warning, '48% open · 18% reply'),
-      _TemplateData('Closing Push — Urgency', 'US market • Technical tone', Icons.timer_rounded, AppColors.error, '60% open · 8% reply'),
-      _TemplateData('Warm Intro — Mutual Connection', 'All markets • Casual tone', Icons.handshake_rounded, AppColors.success, '65% open · 28% reply'),
-    ];
-
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      itemCount: templates.length,
-      itemBuilder: (context, index) {
-        final t = templates[index];
-        return AppCard(
-          margin: const EdgeInsets.only(bottom: 10),
-          onTap: () {},
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: t.color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(t.icon, color: t.color, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(t.name,
-                        style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                    const SizedBox(height: 2),
-                    Text(t.subtitle,
-                        style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary)),
-                    const SizedBox(height: 4),
-                    Text(t.metrics,
-                        style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.success)),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right_rounded, color: AppColors.textTertiary, size: 20),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _MessageData {
-  final String channel, sender, preview, time, status;
-  final IconData icon;
-  final Color color;
-  _MessageData(this.channel, this.sender, this.preview, this.time, this.status, this.icon, this.color);
-}
-
-class _TemplateData {
-  final String name, subtitle, metrics;
-  final IconData icon;
-  final Color color;
-  _TemplateData(this.name, this.subtitle, this.icon, this.color, this.metrics);
 }

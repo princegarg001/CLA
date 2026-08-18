@@ -4,6 +4,10 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>CLA listens for voice commands so you can control the app hands-free.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>CLA converts your spoken commands into app actions like "Open War Room".</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

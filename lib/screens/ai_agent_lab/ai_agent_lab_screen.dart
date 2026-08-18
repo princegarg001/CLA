@@ -1,49 +1,89 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_shadows.dart';
+import '../../data/models/agent_models.dart';
+import '../../providers/agent_lab_provider.dart';
 import '../../widgets/shared_components.dart';
 
-class AIAgentLabScreen extends StatelessWidget {
+class AIAgentLabScreen extends StatefulWidget {
   const AIAgentLabScreen({super.key});
 
   @override
+  State<AIAgentLabScreen> createState() => _AIAgentLabScreenState();
+}
+
+class _AIAgentLabScreenState extends State<AIAgentLabScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => context.read<AgentLabProvider>().load());
+  }
+
+  static const _agentMeta = {
+    'prospector': (
+      title: 'The Prospector',
+      description: 'Monitors Apollo sequences, flags replies, scores new leads, triggers follow-ups.',
+      icon: Icons.person_search_rounded,
+      color: AppColors.primary,
+      schedule: '24/7',
+    ),
+    'publisher': (
+      title: 'The Publisher',
+      description: 'Drafts next week\'s Twitter threads, pulls trending topics, generates post options.',
+      icon: Icons.create_rounded,
+      color: AppColors.accent,
+      schedule: 'Sundays',
+    ),
+    'researcher': (
+      title: 'The Researcher',
+      description: 'Researches new leads: funding, tech stack, news, job openings. Full brief before calls.',
+      icon: Icons.biotech_rounded,
+      color: Color(0xFF7C4DFF),
+      schedule: 'On Trigger',
+    ),
+  };
+
+  @override
   Widget build(BuildContext context) {
+    final provider = context.watch<AgentLabProvider>();
     return Scaffold(
       backgroundColor: AppColors.scaffoldBg,
-      body: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildHeader(),
-            const SizedBox(height: 8),
-            // Agent cards
-            _buildAgentCards(),
-            const SizedBox(height: 4),
-            // Verdent.ai recommendations
-            _buildVerdentSection(),
-            const SizedBox(height: 4),
-            // HeadAI signals
-            _buildHeadAISection(),
-            const SizedBox(height: 4),
-            // Gro.app automations
-            _buildGroSection(),
-            const SizedBox(height: 24),
-          ],
+      body: RefreshIndicator(
+        onRefresh: () => context.read<AgentLabProvider>().load(),
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildHeader(provider),
+              const SizedBox(height: 8),
+              if (provider.isLoading && provider.status.agents.isEmpty)
+                const Padding(padding: EdgeInsets.symmetric(vertical: 60), child: Center(child: CircularProgressIndicator()))
+              else ...[
+                _buildAgentCards(provider),
+                const SizedBox(height: 4),
+                _buildVerdentSection(provider),
+                const SizedBox(height: 4),
+                _buildHeadAISection(provider),
+                const SizedBox(height: 4),
+                _buildGroSection(provider),
+              ],
+              const SizedBox(height: 24),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(AgentLabProvider provider) {
     return Container(
       width: double.infinity,
       decoration: const BoxDecoration(
         gradient: AppColors.headerGradient,
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(28),
-          bottomRight: Radius.circular(28),
-        ),
+        borderRadius: BorderRadius.only(bottomLeft: Radius.circular(28), bottomRight: Radius.circular(28)),
       ),
       child: SafeArea(
         bottom: false,
@@ -56,42 +96,27 @@ class AIAgentLabScreen extends StatelessWidget {
                 children: [
                   Container(
                     padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)),
                     child: const Icon(Icons.psychology_rounded, color: Colors.white, size: 22),
                   ),
                   const SizedBox(width: 12),
-                  Expanded(
-                    child: Text('AI Agent Lab', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white)),
-                  ),
+                  Expanded(child: Text('AI Agent Lab', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white))),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: AppColors.accentLight.withValues(alpha: 0.3),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
+                    decoration: BoxDecoration(color: AppColors.accentLight.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(20)),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: const BoxDecoration(color: AppColors.accentLight, shape: BoxShape.circle),
-                        ),
+                        Container(width: 8, height: 8, decoration: const BoxDecoration(color: AppColors.accentLight, shape: BoxShape.circle)),
                         const SizedBox(width: 6),
-                        Text('2 Running', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+                        Text('${provider.status.running} Running', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
                       ],
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 16),
-              Text(
-                'Three AI agents working autonomously.\nYou check results, not tasks.',
-                style: GoogleFonts.inter(fontSize: 13, color: Colors.white.withValues(alpha: 0.8)),
-              ),
+              Text('Three AI agents working autonomously.\nYou check results, not tasks.', style: GoogleFonts.inter(fontSize: 13, color: Colors.white.withValues(alpha: 0.8))),
             ],
           ),
         ),
@@ -99,178 +124,116 @@ class AIAgentLabScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildAgentCards() {
-    final agents = [
-      _AgentData(
-        'The Prospector',
-        'Monitors Apollo sequences, flags replies, scores new leads, triggers follow-ups.',
-        Icons.person_search_rounded,
-        AppColors.primary,
-        'running',
-        '24/7',
-        {'Leads Scored': '47', 'Sequences Triggered': '12', 'Replies Flagged': '7'},
-      ),
-      _AgentData(
-        'The Publisher',
-        'Drafts next week\'s Twitter threads, pulls trending topics, generates 5 post options/day.',
-        Icons.create_rounded,
-        AppColors.accent,
-        'running',
-        'Sundays',
-        {'Drafts Ready': '5', 'Topics Sourced': '14', 'Approval Rate': '80%'},
-      ),
-      _AgentData(
-        'The Researcher',
-        'Researches new leads: funding, tech stack, news, LinkedIn, job openings. Full brief before calls.',
-        Icons.biotech_rounded,
-        const Color(0xFF7C4DFF),
-        'idle',
-        'On Trigger',
-        {'Briefs Generated': '23', 'Data Sources': '5', 'Avg Time': '2 min'},
-      ),
-    ];
-
+  Widget _buildAgentCards(AgentLabProvider provider) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
-        children: agents.map((a) => _buildAgentCard(a)).toList(),
-      ),
-    );
-  }
+        children: _agentMeta.entries.map((entry) {
+          final agentName = entry.key;
+          final meta = entry.value;
+          final matches = provider.status.agents.where((a) => a.name == agentName);
+          final info = matches.isEmpty ? null : matches.first;
+          final isRunning = info?.status == 'running';
+          final isTriggering = provider.triggeringAgent == agentName;
 
-  Widget _buildAgentCard(_AgentData agent) {
-    final isRunning = agent.status == 'running';
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.cardBg,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: AppShadows.cardShadow,
-        border: isRunning ? Border.all(color: agent.color.withValues(alpha: 0.3), width: 1.5) : null,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: agent.color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(agent.icon, color: agent.color, size: 24),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          return Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.cardBg,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: AppShadows.cardShadow,
+              border: isRunning ? Border.all(color: meta.color.withValues(alpha: 0.3), width: 1.5) : null,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    Text(agent.name, style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                    const SizedBox(height: 2),
-                    Text('Schedule: ${agent.schedule}', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary)),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: isRunning ? AppColors.successLight : AppColors.surfaceBg,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (isRunning) ...[
-                      Container(width: 6, height: 6, decoration: const BoxDecoration(color: AppColors.success, shape: BoxShape.circle)),
-                      const SizedBox(width: 4),
-                    ],
-                    Text(
-                      isRunning ? 'Running' : 'Idle',
-                      style: GoogleFonts.inter(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: isRunning ? AppColors.success : AppColors.textTertiary,
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(color: meta.color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(14)),
+                      child: Icon(meta.icon, color: meta.color, size: 24),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(meta.title, style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                          const SizedBox(height: 2),
+                          Text('Schedule: ${meta.schedule}', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary)),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(color: isRunning ? AppColors.successLight : AppColors.surfaceBg, borderRadius: BorderRadius.circular(20)),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (isRunning) ...[
+                            Container(width: 6, height: 6, decoration: const BoxDecoration(color: AppColors.success, shape: BoxShape.circle)),
+                            const SizedBox(width: 4),
+                          ],
+                          Text(isRunning ? 'Running' : 'Idle', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: isRunning ? AppColors.success : AppColors.textTertiary)),
+                        ],
                       ),
                     ),
                   ],
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(agent.description, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary)),
-          const SizedBox(height: 14),
-          // Stats
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceBg,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: agent.stats.entries.map((e) => Column(
-                    children: [
-                      Text(e.value, style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: agent.color)),
-                      const SizedBox(height: 2),
-                      Text(e.key, style: GoogleFonts.inter(fontSize: 10, color: AppColors.textTertiary)),
-                    ],
-                  )).toList(),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: SizedBox(
-                  height: 36,
-                  child: ElevatedButton(
-                    onPressed: () {},
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: isRunning ? AppColors.error.withValues(alpha: 0.1) : agent.color.withValues(alpha: 0.1),
-                      foregroundColor: isRunning ? AppColors.error : agent.color,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                const SizedBox(height: 10),
+                Text(meta.description, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary)),
+                if (info?.lastRun != null) ...[
+                  const SizedBox(height: 6),
+                  Text('Last run: ${_relativeTime(info!.lastRun!)}', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textTertiary)),
+                ],
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: SizedBox(
+                        height: 36,
+                        child: ElevatedButton(
+                          onPressed: isTriggering ? null : () => context.read<AgentLabProvider>().trigger(agentName),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: meta.color.withValues(alpha: 0.1),
+                            foregroundColor: meta.color,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          child: isTriggering
+                              ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: meta.color))
+                              : Text('Run Now', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
                     ),
-                    child: Text(isRunning ? 'Pause' : 'Run Now', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600)),
-                  ),
+                  ],
                 ),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(
-                height: 36,
-                child: OutlinedButton(
-                  onPressed: () {},
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.textSecondary,
-                    side: const BorderSide(color: AppColors.border),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  child: Text('View Logs', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w500)),
-                ),
-              ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          );
+        }).toList(),
       ),
     );
   }
 
-  Widget _buildVerdentSection() {
-    final recs = [
-      'Your LinkedIn reply rate dropped 40% this week — switch to value-first replies for 5 days.',
-      'Apollo sequence #3 has 0% reply rate. Replace subject line with: "Quick question about [company]\'s backend"',
-      'You\'ve had 12 UK leads but 0 US leads. Adjust Twitter post times to 9am EST.',
-    ];
+  String _relativeTime(DateTime time) {
+    final diff = DateTime.now().difference(time);
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
 
+  Widget _buildVerdentSection(AgentLabProvider provider) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SectionHeader(title: 'Verdent.ai Insights'),
-        ...recs.map((r) => AppCard(
+        if (provider.verdentInsights.isEmpty)
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text('No insights yet.', style: GoogleFonts.inter(color: AppColors.textTertiary))),
+        ...provider.verdentInsights.map((r) => AppCard(
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               padding: const EdgeInsets.all(14),
               child: Row(
@@ -279,16 +242,11 @@ class AIAgentLabScreen extends StatelessWidget {
                   Container(
                     width: 32,
                     height: 32,
-                    decoration: BoxDecoration(
-                      color: AppColors.warning.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+                    decoration: BoxDecoration(color: AppColors.warning.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
                     child: const Icon(Icons.lightbulb_rounded, color: AppColors.warning, size: 16),
                   ),
                   const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(r, style: GoogleFonts.inter(fontSize: 13, color: AppColors.textPrimary, height: 1.4)),
-                  ),
+                  Expanded(child: Text(r.text, style: GoogleFonts.inter(fontSize: 13, color: AppColors.textPrimary, height: 1.4))),
                 ],
               ),
             )),
@@ -296,38 +254,31 @@ class AIAgentLabScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildHeadAISection() {
+  Widget _buildHeadAISection(AgentLabProvider provider) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SectionHeader(title: 'HeadAI Signals', actionLabel: 'See All'),
-        AppCard(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          child: AppListTile(
-            icon: Icons.trending_up_rounded,
-            iconBgColor: AppColors.success.withValues(alpha: 0.12),
-            iconColor: AppColors.success,
-            title: 'FinScale — 8 eng roles in 30 days',
-            subtitle: 'Growing fast, needs automation infra',
-            trailing: const StatusBadge(label: 'High Priority', bgColor: AppColors.errorLight, textColor: AppColors.error),
-          ),
-        ),
-        AppCard(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          child: AppListTile(
-            icon: Icons.trending_up_rounded,
-            iconBgColor: AppColors.success.withValues(alpha: 0.12),
-            iconColor: AppColors.success,
-            title: 'CloudBridge — 5 backend roles posted',
-            subtitle: 'Series A, US-based, fintech',
-            trailing: const StatusBadge(label: 'Add to Apollo', bgColor: AppColors.infoLight, textColor: AppColors.info),
-          ),
-        ),
+        const SectionHeader(title: 'HeadAI Signals'),
+        if (provider.headaiSignals.isEmpty)
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text('No hiring signals yet.', style: GoogleFonts.inter(color: AppColors.textTertiary))),
+        ...provider.headaiSignals.map((h) => AppCard(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: AppListTile(
+                icon: Icons.trending_up_rounded,
+                iconBgColor: AppColors.success.withValues(alpha: 0.12),
+                iconColor: AppColors.success,
+                title: '${h.company} — ${h.hires} eng roles',
+                subtitle: h.roles.isNotEmpty ? h.roles.join(', ') : (h.region ?? ''),
+                trailing: h.hires >= 5
+                    ? const StatusBadge(label: 'High Priority', bgColor: AppColors.errorLight, textColor: AppColors.error)
+                    : const StatusBadge(label: 'Add to Apollo', bgColor: AppColors.infoLight, textColor: AppColors.info),
+              ),
+            )),
       ],
     );
   }
 
-  Widget _buildGroSection() {
+  Widget _buildGroSection(AgentLabProvider provider) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -337,13 +288,15 @@ class AIAgentLabScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Active Flows', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+              Text('Recent Flow Runs', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
               const SizedBox(height: 12),
-              _buildFlowItem('Gumroad → Apollo Sequence', 'Running • 14 leads processed', AppColors.success),
-              const SizedBox(height: 10),
-              _buildFlowItem('Cold Lead Re-engage', 'Running • 6 in pipeline', AppColors.success),
-              const SizedBox(height: 10),
-              _buildFlowItem('BetaList → Onboarding Email', 'Paused', AppColors.warning),
+              if (provider.groFlows.isEmpty)
+                Text('No Gro.app flow runs yet — trigger one via a webhook.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary))
+              else
+                ...provider.groFlows.take(5).map((f) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _buildFlowItem(f),
+                    )),
             ],
           ),
         ),
@@ -351,16 +304,14 @@ class AIAgentLabScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildFlowItem(String name, String status, Color statusColor) {
+  Widget _buildFlowItem(AgentRun f) {
+    final ok = f.status == 'success';
     return Row(
       children: [
         Container(
           width: 36,
           height: 36,
-          decoration: BoxDecoration(
-            color: AppColors.primary.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(8),
-          ),
+          decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
           child: const Icon(Icons.account_tree_rounded, color: AppColors.primary, size: 16),
         ),
         const SizedBox(width: 10),
@@ -368,22 +319,12 @@ class AIAgentLabScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              Text(status, style: GoogleFonts.inter(fontSize: 11, color: statusColor)),
+              Text(f.startedAt != null ? _relativeTime(f.startedAt!) : f.id, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+              Text(ok ? 'Succeeded' : (f.error ?? f.status), style: GoogleFonts.inter(fontSize: 11, color: ok ? AppColors.success : AppColors.error)),
             ],
           ),
         ),
-        Icon(Icons.chevron_right_rounded, color: AppColors.textTertiary, size: 18),
       ],
     );
   }
-}
-
-class _AgentData {
-  final String name, description;
-  final IconData icon;
-  final Color color;
-  final String status, schedule;
-  final Map<String, String> stats;
-  _AgentData(this.name, this.description, this.icon, this.color, this.status, this.schedule, this.stats);
 }

@@ -18,7 +18,10 @@ const config = {
   // sk-... key + gpt-4o-mini) to switch to real OpenAI instead — aiService.js
   // doesn't care which one it's talking to.
   openaiBaseUrl: process.env.OPENAI_BASE_URL || 'https://api.groq.com/openai/v1',
-  openaiModel: process.env.OPENAI_MODEL || 'llama-3.3-70b-versatile',
+  // Groq's model lineup changes over time (llama-3.3-70b-versatile was
+  // removed at some point) — verify against GET /openai/v1/models with your
+  // key if this one ever starts 404ing again, rather than guessing.
+  openaiModel: process.env.OPENAI_MODEL || 'openai/gpt-oss-120b',
   openaiMaxTokens: parseInt(process.env.OPENAI_MAX_TOKENS || '2048', 10),
 
   apolloApiKey: process.env.APOLLO_API_KEY || '',

@@ -56,7 +56,7 @@ async function scoreLead(lead) {
       json: true,
       maxTokens: 200,
     },
-    JSON.stringify({ score: fallback, reason: 'Heuristic fallback score (OpenAI not configured).' })
+    JSON.stringify({ score: fallback, reason: 'Heuristic fallback score (AI call unavailable — see server logs for why).' })
   );
   try {
     const parsed = JSON.parse(text);
@@ -88,7 +88,7 @@ async function generateLeadBrief(lead) {
       prompt: JSON.stringify(lead),
       maxTokens: 500,
     },
-    `${lead.company || 'This lead'} — no AI brief available (OpenAI not configured). Raw data: ${JSON.stringify(lead)}`
+    `${lead.company || 'This lead'} — no AI brief available right now (see server logs for why). Raw data: ${JSON.stringify(lead)}`
   );
 }
 
@@ -102,7 +102,7 @@ async function generateOutreachMessage({ lead, tone = 'founder_to_founder', mark
       prompt: `Lead: ${JSON.stringify(lead)}\nExtra context: ${context}`,
       maxTokens: 350,
     },
-    `Hi ${lead.name || 'there'},\n\n[AI draft unavailable — OpenAI not configured. Write manually.]\n\n— AlphoTech`
+    `Hi ${lead.name || 'there'},\n\n[AI draft unavailable right now — write this one manually.]\n\n— AlphoTech`
   );
 }
 
@@ -115,7 +115,7 @@ async function generateTwitterThread(topic) {
       prompt: `Topic: ${topic}`,
       maxTokens: 700,
     },
-    `[AI thread unavailable — OpenAI not configured]\nHook: ${topic}\n...`
+    `[AI thread unavailable right now]\nHook: ${topic}\n...`
   );
 }
 
@@ -128,7 +128,7 @@ async function weeklyStrategicInsight(metrics) {
       prompt: JSON.stringify(metrics),
       maxTokens: 400,
     },
-    'AI insight unavailable — OpenAI not configured. Review your metrics manually this week.'
+    'AI insight unavailable right now. Review your metrics manually this week.'
   );
 }
 

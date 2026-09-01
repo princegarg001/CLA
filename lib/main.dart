@@ -15,6 +15,7 @@ import 'data/repositories/leads_repository.dart';
 import 'data/repositories/outreach_repository.dart';
 import 'data/repositories/revenue_repository.dart';
 import 'data/repositories/settings_repository.dart';
+import 'data/repositories/social_repository.dart';
 import 'data/repositories/war_room_repository.dart';
 import 'providers/agent_lab_provider.dart';
 import 'providers/analytics_provider.dart';
@@ -25,6 +26,7 @@ import 'providers/leads_provider.dart';
 import 'providers/outreach_provider.dart';
 import 'providers/revenue_provider.dart';
 import 'providers/settings_provider.dart';
+import 'providers/social_provider.dart';
 import 'providers/voice_auth_controller.dart';
 import 'providers/war_room_provider.dart';
 import 'screens/auth/auth_gate.dart';
@@ -76,6 +78,7 @@ class CLAApp extends StatelessWidget {
         Provider(create: (context) => AnalyticsRepository(context.read<ApiClient>())),
         Provider(create: (context) => OutreachRepository(context.read<ApiClient>())),
         Provider(create: (context) => SettingsRepository(context.read<ApiClient>())),
+        Provider(create: (context) => SocialRepository(context.read<ApiClient>())),
 
         // Screen providers — hold loading/error/data state for each of the 9 screens.
         ChangeNotifierProvider(create: (context) => LeadsProvider(context.read<LeadsRepository>())),
@@ -92,6 +95,7 @@ class CLAApp extends StatelessWidget {
         ChangeNotifierProvider(create: (context) => AnalyticsProvider(context.read<AnalyticsRepository>())),
         ChangeNotifierProvider(create: (context) => OutreachProvider(context.read<OutreachRepository>())),
         ChangeNotifierProvider(create: (context) => SettingsProvider(context.read<SettingsRepository>())),
+        ChangeNotifierProvider(create: (context) => SocialProvider(context.read<SocialRepository>())),
       ],
       child: MaterialApp(
         title: 'AlphoTech CLA v2',

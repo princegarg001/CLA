@@ -19,6 +19,10 @@ app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }
 // without the app's own X-API-Key (external services can't send it).
 app.use('/api/webhooks', apiLimiter, require('./routes/webhooks'));
 
+// OAuth callbacks (LinkedIn/Instagram redirect the user's browser here
+// directly) — same reasoning as webhooks, must stay reachable unauthenticated.
+app.use('/api/oauth', apiLimiter, require('./routes/oauthCallbacks'));
+
 // Everything else requires X-API-Key when CLA_API_KEY is set.
 const api = express.Router();
 api.use(apiKeyAuth, apiLimiter);
@@ -35,6 +39,7 @@ api.use('/outreach', require('./routes/outreach'));
 api.use('/settings', require('./routes/settings'));
 api.use('/warroom', require('./routes/warRoom'));
 api.use('/intelligence', require('./routes/intelligence'));
+api.use('/social', require('./routes/social'));
 app.use('/api', api);
 
 app.use(notFoundHandler);

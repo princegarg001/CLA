@@ -5,7 +5,10 @@ let client = null;
 function getClient() {
   if (!client) {
     const OpenAI = require('openai');
-    client = new OpenAI({ apiKey: config.openaiApiKey });
+    // The `openai` SDK talks to any OpenAI-compatible endpoint, not just
+    // OpenAI itself — baseURL is what actually selects the provider (Groq by
+    // default here; see config.js).
+    client = new OpenAI({ apiKey: config.openaiApiKey, baseURL: config.openaiBaseUrl });
   }
   return client;
 }

@@ -5,7 +5,9 @@ import '../../core/config/app_config.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_shadows.dart';
 import '../../data/models/misc_models.dart';
+import '../../data/models/social_models.dart';
 import '../../providers/settings_provider.dart';
+import '../../providers/social_provider.dart';
 import '../../providers/voice_auth_controller.dart';
 import '../../widgets/shared_components.dart';
 
@@ -75,6 +77,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 4),
               const SectionHeader(title: 'Backend Connection'),
               _buildBackendConfig(context),
+              const SizedBox(height: 8),
+              const SectionHeader(title: 'Connected Accounts'),
+              const _ConnectedAccountsSection(),
               const SizedBox(height: 8),
               const SectionHeader(title: 'Platform Integrations'),
               _buildIntegrationsList(provider),
@@ -348,6 +353,81 @@ class _BackendConfigFormState extends State<_BackendConfigForm> {
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         ),
+      ),
+    );
+  }
+}
+
+/// Connect/disconnect LinkedIn + Instagram for the Automation Engine
+/// (Growth Studio's "Auto-Post" tab). Twitter/X still lives under Platform
+/// Integrations below since it's a single API key, not an OAuth connection.
+class _ConnectedAccountsSection extends StatefulWidget {
+  const _ConnectedAccountsSection();
+
+  @override
+  State<_ConnectedAccountsSection> createState() => _ConnectedAccountsSectionState();
+}
+
+class _ConnectedAccountsSectionState extends State<_ConnectedAccountsSection> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => context.read<SocialProvider>().load());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final social = context.watch<SocialProvider>();
+    return Column(
+      children: [
+        _accountRow(context, 'linkedin', 'LinkedIn', Icons.business_center_rounded, const Color(0xFF0077B5), social.status.linkedin),
+        _accountRow(context, 'instagram', 'Instagram', Icons.camera_alt_rounded, const Color(0xFFE1306C), social.status.instagram),
+      ],
+    );
+  }
+
+  Widget _accountRow(BuildContext context, String platform, String label, IconData icon, Color color, PlatformStatus status) {
+    return AppCard(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
+            child: Icon(icon, color: color, size: 22),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                const SizedBox(height: 2),
+                Text(
+                  !status.appConfigured
+                      ? 'App credentials not set'
+                      : status.connected
+                          ? 'Connected${status.accountName != null ? ' as ${status.accountName}' : ''}'
+                          : 'Not connected',
+                  style: GoogleFonts.inter(fontSize: 11, color: AppColors.textTertiary),
+                ),
+              ],
+            ),
+          ),
+          if (status.appConfigured)
+            TextButton(
+              onPressed: () async {
+                final social = context.read<SocialProvider>();
+                if (status.connected) {
+                  await social.disconnect(platform);
+                } else {
+                  await social.connect(platform);
+                }
+              },
+              child: Text(status.connected ? 'Disconnect' : 'Connect', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600)),
+            ),
+        ],
       ),
     );
   }

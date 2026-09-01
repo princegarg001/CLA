@@ -34,4 +34,12 @@ class LeadsProvider extends ChangeNotifier with ViewStateMixin {
         leads = [for (final l in leads) if (l.id == id) updated else l];
         notifyListeners();
       });
+
+  /// Locking marks a lead as actively-being-worked: the hourly rescoring cron
+  /// skips it and War Room stops resurfacing it as a "new" mission.
+  Future<bool> toggleLock(Lead lead) => runAction(() async {
+        final updated = await _repo.update(lead.id, {'locked': !lead.locked});
+        leads = [for (final l in leads) if (l.id == lead.id) updated else l];
+        notifyListeners();
+      });
 }

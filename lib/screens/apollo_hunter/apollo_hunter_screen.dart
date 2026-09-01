@@ -169,6 +169,7 @@ class _ApolloHunterScreenState extends State<ApolloHunterScreen> {
   Widget _leadCard(Lead lead, bool inPipeline, ApolloProvider provider) {
     return AppCard(
       margin: const EdgeInsets.only(bottom: 10),
+      color: lead.locked ? AppColors.warning.withValues(alpha: 0.06) : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -183,6 +184,24 @@ class _ApolloHunterScreenState extends State<ApolloHunterScreen> {
                     Row(
                       children: [
                         Expanded(child: Text(lead.displayName, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
+                        if (inPipeline) ...[
+                          GestureDetector(
+                            onTap: () => provider.toggleLock(lead),
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              margin: const EdgeInsets.only(right: 6),
+                              decoration: BoxDecoration(
+                                color: lead.locked ? AppColors.warning.withValues(alpha: 0.15) : AppColors.surfaceBg,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(
+                                lead.locked ? Icons.lock_rounded : Icons.lock_open_rounded,
+                                size: 14,
+                                color: lead.locked ? AppColors.warning : AppColors.textTertiary,
+                              ),
+                            ),
+                          ),
+                        ],
                         StatusBadge.score(lead.score),
                       ],
                     ),

@@ -13,7 +13,12 @@ const config = {
   supabaseKey: process.env.SUPABASE_KEY || '',
 
   openaiApiKey: process.env.OPENAI_API_KEY || '',
-  openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+  // Defaults to Groq's OpenAI-compatible endpoint since that's the free provider
+  // this app ships wired to. Point back at https://api.openai.com/v1 (and use an
+  // sk-... key + gpt-4o-mini) to switch to real OpenAI instead — aiService.js
+  // doesn't care which one it's talking to.
+  openaiBaseUrl: process.env.OPENAI_BASE_URL || 'https://api.groq.com/openai/v1',
+  openaiModel: process.env.OPENAI_MODEL || 'llama-3.3-70b-versatile',
   openaiMaxTokens: parseInt(process.env.OPENAI_MAX_TOKENS || '2048', 10),
 
   apolloApiKey: process.env.APOLLO_API_KEY || '',
@@ -64,6 +69,15 @@ const config = {
   smtpUser: process.env.SMTP_USER || '',
   smtpPass: process.env.SMTP_PASS || '',
   alertEmailTo: process.env.ALERT_EMAIL_TO || '',
+
+  // ---- Social publishing (Automation Engine) --------------------------------
+  linkedinClientId: process.env.LINKEDIN_CLIENT_ID || '',
+  linkedinClientSecret: process.env.LINKEDIN_CLIENT_SECRET || '',
+  linkedinRedirectUri: process.env.LINKEDIN_REDIRECT_URI || '',
+
+  metaAppId: process.env.META_APP_ID || '',
+  metaAppSecret: process.env.META_APP_SECRET || '',
+  metaRedirectUri: process.env.META_REDIRECT_URI || '',
 };
 
 // isConfigured('apollo') -> true if APOLLO_API_KEY is set, etc.
@@ -89,6 +103,12 @@ const CHECKS = {
   foundersDb: () => !!config.foundersDbKey,
   paperclip: () => !!config.paperclipKey,
   smtp: () => !!(config.smtpHost && config.smtpUser && config.smtpPass),
+  // These reflect "the app credentials exist so the OAuth flow can start" —
+  // not "an account is actually connected". Actual connection status (a real
+  // token stored in oauth_connections) is reported separately by
+  // GET /api/social/status, since that requires a DB read this sync check can't do.
+  linkedin: () => !!(config.linkedinClientId && config.linkedinClientSecret),
+  instagram: () => !!(config.metaAppId && config.metaAppSecret),
 };
 
 config.isConfigured = (name) => (CHECKS[name] ? CHECKS[name]() : false);

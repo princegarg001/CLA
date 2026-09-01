@@ -7,6 +7,7 @@ const { newId, nowIso } = require('./utils/helpers');
 const TABLES = [
   'leads', 'deals', 'sequences', 'messages', 'templates',
   'settings', 'icp_profiles', 'scheduled_posts', 'agent_runs',
+  'oauth_connections', 'social_posts',
 ];
 
 const DB_FILE = path.resolve(__dirname, '..', 'data', 'db.json');

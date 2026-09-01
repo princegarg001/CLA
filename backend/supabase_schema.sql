@@ -25,14 +25,18 @@ create table if not exists leads (
   urgency text, -- low | medium | high
   score numeric default 1 check (score >= 1 and score <= 10),
   status text not null default 'new', -- new | contacted | replied | call_booked | proposal_sent | closed_won | closed_lost
+  locked boolean not null default false, -- actively being worked: skip auto-rescoring, don't resurface as a "new" mission
   ai_brief text,
   raw jsonb default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+-- Safe to re-run against a DB where `leads` already exists without `locked`.
+alter table leads add column if not exists locked boolean not null default false;
 create index if not exists idx_leads_score on leads (score desc);
 create index if not exists idx_leads_source on leads (source);
 create index if not exists idx_leads_status on leads (status);
+create index if not exists idx_leads_locked on leads (locked);
 
 -- ---------------------------------------------------------------------------
 -- deals — closed revenue (custom projects + recognized SaaS milestones)
@@ -164,11 +168,48 @@ create table if not exists agent_runs (
 create index if not exists idx_agent_runs_agent on agent_runs (agent, started_at desc);
 
 -- ---------------------------------------------------------------------------
+-- oauth_connections — server-held tokens for platforms CLA posts to on your
+-- behalf (LinkedIn, Instagram). Never exposed to the Flutter app; only the
+-- backend reads/writes this table.
+-- ---------------------------------------------------------------------------
+create table if not exists oauth_connections (
+  id uuid primary key default uuid_generate_v4(),
+  platform text not null unique, -- linkedin | instagram
+  access_token text not null,
+  refresh_token text,
+  expires_at timestamptz,
+  external_account_id text,
+  external_account_name text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
+-- social_posts — log of "Publish Everywhere" attempts, one row per platform
+-- per publish call, so partial failures (e.g. LinkedIn ok, Instagram failed)
+-- are visible after the fact.
+-- ---------------------------------------------------------------------------
+create table if not exists social_posts (
+  id uuid primary key default uuid_generate_v4(),
+  batch_id uuid not null default uuid_generate_v4(), -- groups the platforms from one "Publish Everywhere" call
+  platform text not null, -- twitter | linkedin | instagram
+  content text not null,
+  image_url text,
+  status text not null default 'pending', -- pending | success | failed
+  external_post_id text,
+  error text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_social_posts_batch on social_posts (batch_id);
+
+-- ---------------------------------------------------------------------------
 -- Row Level Security
 -- This is a single-tenant founder tool. RLS is enabled with a service-role-only
--- policy: the backend talks to Supabase using the service key (bypasses RLS) or
--- the anon key restricted to these policies. Tighten further if you add real
--- multi-user auth later.
+-- policy, so the backend MUST connect using the "service_role" key (Project
+-- Settings -> API), not the anon/public key — the anon key would satisfy none
+-- of these policies and every query would silently return zero rows. Only the
+-- backend (a trusted server) should ever hold the service_role key; never ship
+-- it to the Flutter app. Tighten further if you add real multi-user auth later.
 -- ---------------------------------------------------------------------------
 alter table leads enable row level security;
 alter table deals enable row level security;
@@ -179,12 +220,14 @@ alter table settings enable row level security;
 alter table icp_profiles enable row level security;
 alter table scheduled_posts enable row level security;
 alter table agent_runs enable row level security;
+alter table oauth_connections enable row level security;
+alter table social_posts enable row level security;
 
 do $$
 declare
   t text;
 begin
-  for t in select unnest(array['leads','deals','sequences','messages','templates','settings','icp_profiles','scheduled_posts','agent_runs'])
+  for t in select unnest(array['leads','deals','sequences','messages','templates','settings','icp_profiles','scheduled_posts','agent_runs','oauth_connections','social_posts'])
   loop
     execute format('drop policy if exists "service_role_all" on %I;', t);
     execute format(

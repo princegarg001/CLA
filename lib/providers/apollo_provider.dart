@@ -44,4 +44,12 @@ class ApolloProvider extends ChangeNotifier with ViewStateMixin {
         icpProfiles = [saved, ...icpProfiles];
         notifyListeners();
       });
+
+  /// Locking marks a lead as actively-being-worked: the hourly rescoring cron
+  /// skips it and War Room stops resurfacing it as a "new" mission.
+  Future<bool> toggleLock(Lead lead) => runAction(() async {
+        final updated = await _leads.update(lead.id, {'locked': !lead.locked});
+        pipelineLeads = [for (final l in pipelineLeads) if (l.id == lead.id) updated else l];
+        notifyListeners();
+      });
 }

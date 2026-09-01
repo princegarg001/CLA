@@ -17,7 +17,8 @@ async function buildMissions() {
     return [{ text: 'Site has a critical error affecting the contact form — fix before anything else today.', priority: 1 }];
   }
 
-  const hotLeads = leads.filter((l) => (l.score || 0) >= 8);
+  // Locked leads are already being actively worked — don't re-suggest them as missions.
+  const hotLeads = leads.filter((l) => (l.score || 0) >= 8 && !l.locked);
   const fallback = [
     hotLeads[0] && { text: `Follow up with ${hotLeads[0].name || hotLeads[0].company} — score ${hotLeads[0].score}/10, highest-intent lead right now.`, priority: 1 },
     { text: 'Review yesterday\'s Apollo sequence replies and send follow-ups.', priority: 2 },

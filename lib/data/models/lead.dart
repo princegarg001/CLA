@@ -18,6 +18,7 @@ class Lead {
   final String? urgency;
   final int score;
   final String status;
+  final bool locked;
   final String? aiBrief;
   final Map<String, dynamic> raw;
   final DateTime? createdAt;
@@ -40,6 +41,7 @@ class Lead {
     this.urgency,
     this.score = 1,
     this.status = 'new',
+    this.locked = false,
     this.aiBrief,
     this.raw = const {},
     this.createdAt,
@@ -75,6 +77,7 @@ class Lead {
       urgency: json['urgency'] as String?,
       score: (json['score'] as num?)?.round() ?? 1,
       status: json['status']?.toString() ?? 'new',
+      locked: json['locked'] == true,
       aiBrief: json['ai_brief'] as String?,
       raw: (json['raw'] as Map?)?.cast<String, dynamic>() ?? const {},
       createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),

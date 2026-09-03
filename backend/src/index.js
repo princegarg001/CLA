@@ -8,6 +8,10 @@ const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 const scheduler = require('./cron/scheduler');
 
 const app = express();
+// Render (and most PaaS hosts) sit behind a reverse proxy — tell Express so
+// express-rate-limit reads the real client IP from X-Forwarded-For instead of
+// erroring with ERR_ERL_UNEXPECTED_X_FORWARDED_FOR.
+app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));

@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme/app_colors.dart';
 import '../../data/models/lead.dart';
 import '../../data/models/misc_models.dart';
+import '../../data/models/upwork_models.dart';
 import '../../providers/freelance_provider.dart';
+import '../../providers/upwork_provider.dart';
 import '../../widgets/shared_components.dart';
 
 class FreelanceRadarScreen extends StatefulWidget {
@@ -21,7 +25,10 @@ class _FreelanceRadarScreenState extends State<FreelanceRadarScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => context.read<FreelanceProvider>().load());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<FreelanceProvider>().load();
+      context.read<UpworkProvider>().load();
+    });
   }
 
   @override
@@ -34,18 +41,20 @@ class _FreelanceRadarScreenState extends State<FreelanceRadarScreen> {
           _buildHeader(provider),
           const SizedBox(height: 4),
           AppTabBar(
-            tabs: const ['SolidGigs', 'Contra', 'Startups.rip'],
+            tabs: const ['Upwork', 'SolidGigs', 'Contra', 'Startups.rip'],
             selectedIndex: _selectedTab,
             onTap: (i) => setState(() => _selectedTab = i),
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: provider.isLoading && provider.solidGigs.isEmpty && provider.contra.isEmpty
+            child: _selectedTab == 0
+                ? const _UpworkTab()
+                : provider.isLoading && provider.solidGigs.isEmpty && provider.contra.isEmpty
                 ? const Center(child: CircularProgressIndicator())
                 : RefreshIndicator(
                     onRefresh: () => context.read<FreelanceProvider>().load(),
                     child: IndexedStack(
-                      index: _selectedTab,
+                      index: _selectedTab - 1,
                       children: [
                         _buildJobList(provider.solidGigs.where((l) => !_dismissed.contains(l.id)).toList(), 'solidgigs'),
                         _buildJobList(provider.contra.where((l) => !_dismissed.contains(l.id)).toList(), 'contra'),
@@ -311,5 +320,289 @@ class _FreelanceRadarScreenState extends State<FreelanceRadarScreen> {
             )),
       ],
     );
+  }
+}
+
+/// Upwork Radar tab — real-time job monitoring (via webhook/email/manual
+/// paste, since Upwork has no public feed API), AI fit-scoring, and
+/// one-tap proposal drafts. Auto-apply is against Upwork ToS, so every
+/// action here ends at "copy the proposal and paste it in the browser."
+class _UpworkTab extends StatefulWidget {
+  const _UpworkTab();
+
+  @override
+  State<_UpworkTab> createState() => _UpworkTabState();
+}
+
+class _UpworkTabState extends State<_UpworkTab> {
+  final Set<String> _expandedProposals = {};
+
+  @override
+  Widget build(BuildContext context) {
+    final upwork = context.watch<UpworkProvider>();
+
+    if (upwork.isLoading && upwork.jobs.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return RefreshIndicator(
+      onRefresh: () => context.read<UpworkProvider>().load(),
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (upwork.stats != null) _buildStatsDashboard(upwork.stats!),
+            const SizedBox(height: 12),
+            const SectionHeader(title: 'Job Matches'),
+            if (upwork.jobs.isEmpty)
+              Text('No jobs yet — connect a Vollna webhook or paste one manually.', style: GoogleFonts.inter(color: AppColors.textTertiary))
+            else
+              ...(upwork.jobs..sort((a, b) => b.aiScore.compareTo(a.aiScore))).map((job) => _buildJobCard(context, upwork, job)),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatsDashboard(UpworkStats stats) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(child: StatCard(icon: Icons.emoji_events_rounded, label: 'Win Rate', value: '${(stats.winRate * 100).round()}%')),
+            const SizedBox(width: 12),
+            Expanded(
+              child: StatCard(
+                icon: Icons.attach_money_rounded,
+                label: 'Avg Deal',
+                value: '\$${stats.avgDealSize.round()}',
+                iconBgColor: AppColors.success.withValues(alpha: 0.12),
+                iconColor: AppColors.success,
+              ),
+            ),
+          ],
+        ),
+        if (stats.sample) ...[
+          const SizedBox(height: 8),
+          const StatusBadge(label: 'Sample data — connect a webhook to see real numbers', bgColor: AppColors.warningLight, textColor: AppColors.warning),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildJobCard(BuildContext context, UpworkProvider upwork, UpworkJob job) {
+    final history = job.clientHistory;
+    final hireRate = history['hireRate'];
+    final totalSpent = history['totalSpent'];
+    final expanded = _expandedProposals.contains(job.id);
+
+    return AppCard(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(job.title, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                    const SizedBox(height: 3),
+                    Text(job.clientName ?? 'Unknown client', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary)),
+                  ],
+                ),
+              ),
+              StatusBadge.score(job.aiScore.round()),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              const Icon(Icons.attach_money_rounded, size: 14, color: AppColors.success),
+              Text(job.budgetLabel, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.success)),
+              if (job.country != null) ...[
+                const SizedBox(width: 16),
+                const Icon(Icons.flag_rounded, size: 14, color: AppColors.textTertiary),
+                const SizedBox(width: 2),
+                Text(job.country!, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textTertiary)),
+              ],
+              const Spacer(),
+              if (job.status != 'new') StatusBadge(label: job.status[0].toUpperCase() + job.status.substring(1), bgColor: AppColors.infoLight, textColor: AppColors.info),
+            ],
+          ),
+          if (hireRate != null || totalSpent != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              [
+                if (hireRate != null) '${((hireRate as num) * 100).round()}% hire rate',
+                if (totalSpent != null) '\$${(totalSpent as num).round()} spent',
+              ].join(' · '),
+              style: GoogleFonts.inter(fontSize: 11, color: AppColors.textTertiary),
+            ),
+          ],
+          if (job.skills.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: job.skills
+                  .map((s) => Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(color: AppColors.primaryLight.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
+                        child: Text(s, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.primary)),
+                      ))
+                  .toList(),
+            ),
+          ],
+          if (job.aiScoreReason != null) ...[
+            const SizedBox(height: 8),
+            Text(job.aiScoreReason!, style: GoogleFonts.inter(fontSize: 11, fontStyle: FontStyle.italic, color: AppColors.textTertiary)),
+          ],
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 36,
+                  child: ElevatedButton.icon(
+                    onPressed: () => setState(() => expanded ? _expandedProposals.remove(job.id) : _expandedProposals.add(job.id)),
+                    icon: const Icon(Icons.auto_awesome_rounded, size: 14),
+                    label: Text(expanded ? 'Hide Proposal' : 'View Proposal', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.accent,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ),
+              ),
+              if (job.upworkUrl != null) ...[
+                const SizedBox(width: 8),
+                SizedBox(
+                  height: 36,
+                  child: OutlinedButton(
+                    onPressed: () => launchUrl(Uri.parse(job.upworkUrl!), mode: LaunchMode.externalApplication),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textSecondary,
+                      side: const BorderSide(color: AppColors.border),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    child: Text('Open', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w500)),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (expanded) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: AppColors.surfaceBg, borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.border)),
+              child: Text(
+                job.aiProposal?.isNotEmpty == true ? job.aiProposal! : 'No proposal drafted yet — tap Regenerate.',
+                style: GoogleFonts.inter(fontSize: 12, color: AppColors.textPrimary, height: 1.4),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedAccentButton(
+                    label: 'Copy',
+                    icon: Icons.copy_rounded,
+                    onPressed: job.aiProposal == null
+                        ? () {}
+                        : () {
+                            Clipboard.setData(ClipboardData(text: job.aiProposal!));
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Proposal copied')));
+                          },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedAccentButton(
+                    label: 'Regenerate',
+                    icon: Icons.refresh_rounded,
+                    onPressed: () => context.read<UpworkProvider>().regenerateProposal(job.id),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (job.status == 'new' || job.status == 'applied' || job.status == 'interviewing') ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                if (job.status == 'new')
+                  Expanded(
+                    child: OutlinedAccentButton(
+                      label: 'Mark Applied',
+                      icon: Icons.check_rounded,
+                      onPressed: () => context.read<UpworkProvider>().markStatus(job.id, 'applied'),
+                    ),
+                  ),
+                if (job.status == 'applied')
+                  Expanded(
+                    child: OutlinedAccentButton(
+                      label: 'Interviewing',
+                      icon: Icons.chat_rounded,
+                      onPressed: () => context.read<UpworkProvider>().markStatus(job.id, 'interviewing'),
+                    ),
+                  ),
+                if (job.status == 'interviewing') ...[
+                  Expanded(
+                    child: OutlinedAccentButton(
+                      label: 'Hired',
+                      icon: Icons.celebration_rounded,
+                      onPressed: () => _promptOutcome(context, job),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                if (job.status != 'new') ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedAccentButton(
+                      label: 'Rejected',
+                      icon: Icons.close_rounded,
+                      color: AppColors.error,
+                      onPressed: () => context.read<UpworkProvider>().markStatus(job.id, 'rejected'),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _promptOutcome(BuildContext context, UpworkJob job) async {
+    final controller = TextEditingController();
+    final value = await showDialog<num>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Deal value', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(hintText: 'e.g. 5000'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, num.tryParse(controller.text)), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (!context.mounted) return;
+    await context.read<UpworkProvider>().markStatus(job.id, 'hired', outcomeValue: value);
   }
 }

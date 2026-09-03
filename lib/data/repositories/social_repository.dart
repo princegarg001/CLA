@@ -38,4 +38,26 @@ class SocialRepository {
     final results = (data as Map)['results'] as List? ?? [];
     return results.map((e) => PublishResult.fromJson(e as Map<String, dynamic>)).toList();
   }
+
+  Future<InstagramInsights> instagramInsights() async {
+    final data = await _client.get('/social/instagram/insights');
+    return InstagramInsights.fromJson(data as Map<String, dynamic>);
+  }
+
+  Future<List<InstagramMedia>> instagramMedia() async {
+    final data = await _client.get('/social/instagram/media');
+    return (data as List).map((e) => InstagramMedia.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<PublishResult> publishCarousel({required List<String> imageUrls, required String caption}) async {
+    final data = await _client.post('/social/publish-carousel', body: {'imageUrls': imageUrls, 'caption': caption});
+    final map = (data as Map).cast<String, dynamic>();
+    return PublishResult.fromJson({'platform': 'instagram', ...map});
+  }
+
+  Future<PublishResult> publishReel({required String videoUrl, required String caption}) async {
+    final data = await _client.post('/social/publish-reel', body: {'videoUrl': videoUrl, 'caption': caption});
+    final map = (data as Map).cast<String, dynamic>();
+    return PublishResult.fromJson({'platform': 'instagram', ...map});
+  }
 }

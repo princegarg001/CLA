@@ -5,6 +5,7 @@ const { randomUUID } = require('crypto');
 const linkedinService = require('../services/linkedinService');
 const instagramService = require('../services/instagramService');
 const twitterService = require('../services/twitterService');
+const redditService = require('../services/redditService');
 const storageService = require('../services/storageService');
 const config = require('../config');
 const db = require('../db');
@@ -34,7 +35,12 @@ router.get('/status', asyncHandler(async (req, res) => {
   ok(res, {
     linkedin,
     instagram,
-    twitter: { appConfigured: config.isConfigured('twitter'), connected: config.isConfigured('twitter'), features: twitterFeatures },
+    twitter: {
+      appConfigured: config.isConfigured('twitter'),
+      connected: twitterService.canPost(),
+      features: twitterFeatures,
+    },
+    reddit: redditService.status(),
   });
 }));
 
@@ -108,6 +114,47 @@ router.post('/publish', asyncHandler(async (req, res) => {
   );
 
   ok(res, { batchId, results: settled });
+}));
+
+// ---- Instagram advanced ----------------------------------------------------
+
+router.get('/instagram/insights', asyncHandler(async (req, res) => {
+  ok(res, await instagramService.getAccountInsights());
+}));
+
+router.get('/instagram/media', asyncHandler(async (req, res) => {
+  ok(res, await instagramService.getMedia({ limit: req.query.limit ? Number(req.query.limit) : undefined }));
+}));
+
+router.get('/instagram/media/:id/insights', asyncHandler(async (req, res) => {
+  ok(res, await instagramService.getMediaInsights(req.params.id));
+}));
+
+router.get('/instagram/comments', asyncHandler(async (req, res) => {
+  const { mediaId } = req.query;
+  if (!mediaId) return fail(res, 400, 'mediaId query param is required');
+  ok(res, await instagramService.getComments(mediaId));
+}));
+
+router.post('/publish-carousel', asyncHandler(async (req, res) => {
+  const { imageUrls, caption } = req.body || {};
+  if (!Array.isArray(imageUrls) || imageUrls.length < 2) return fail(res, 400, 'imageUrls must have at least 2 URLs');
+  const result = await instagramService.postCarousel(imageUrls, caption || '');
+  ok(res, result);
+}));
+
+router.post('/publish-reel', asyncHandler(async (req, res) => {
+  const { videoUrl, caption } = req.body || {};
+  if (!videoUrl) return fail(res, 400, 'videoUrl is required');
+  const result = await instagramService.postReel(videoUrl, caption || '');
+  ok(res, result);
+}));
+
+router.post('/publish-story', asyncHandler(async (req, res) => {
+  const { imageUrl, videoUrl } = req.body || {};
+  if (!imageUrl && !videoUrl) return fail(res, 400, 'imageUrl or videoUrl is required');
+  const result = await instagramService.postStory({ imageUrl, videoUrl });
+  ok(res, result);
 }));
 
 module.exports = router;

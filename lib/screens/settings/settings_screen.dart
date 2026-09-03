@@ -34,6 +34,8 @@ const Map<String, _IntegrationMeta> _integrationMeta = {
   'umami': _IntegrationMeta('Umami', 'API Token + Site ID', Icons.analytics_rounded, AppColors.accent),
   'sentry': _IntegrationMeta('Sentry', 'DSN + Auth Token', Icons.bug_report_rounded, AppColors.error),
   'twitter': _IntegrationMeta('Twitter/X', 'OAuth 2.0', Icons.alternate_email_rounded, Color(0xFF1DA1F2)),
+  'reddit': _IntegrationMeta('Reddit', 'Script App (OAuth2)', Icons.forum_rounded, Color(0xFFFF4500)),
+  'upwork': _IntegrationMeta('Upwork', 'Webhook Secret', Icons.work_history_rounded, Color(0xFF14A800)),
   'trustmrr': _IntegrationMeta('TrustMRR', 'API Key', Icons.attach_money_rounded, AppColors.success),
   'gumroad': _IntegrationMeta('Gumroad', 'Access Token', Icons.storefront_rounded, Color(0xFFFF90A4)),
   'betalist': _IntegrationMeta('BetaList', 'RSS + Webhook', Icons.rocket_rounded, Color(0xFF7C4DFF)),

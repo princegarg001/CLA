@@ -121,9 +121,7 @@ async function postImage(imageUrl, caption) {
     const { data: container } = await axios.post(`${GRAPH}/${conn.external_account_id}/media`, null, {
       params: { image_url: imageUrl, caption, access_token: conn.access_token },
     });
-    const { data: published } = await axios.post(`${GRAPH}/${conn.external_account_id}/media_publish`, null, {
-      params: { creation_id: container.id, access_token: conn.access_token },
-    });
+    const published = await publishContainer(conn, container.id);
     return { status: 'success', externalPostId: published.id };
   } catch (e) {
     logger.error('instagramService.postImage failed', { error: e.response?.data || e.message });
@@ -131,4 +129,193 @@ async function postImage(imageUrl, caption) {
   }
 }
 
-module.exports = { isAppConfigured, getAuthUrl, handleCallback, isConnected, status, disconnect, postImage };
+async function publishContainer(conn, creationId) {
+  const { data } = await axios.post(`${GRAPH}/${conn.external_account_id}/media_publish`, null, {
+    params: { creation_id: creationId, access_token: conn.access_token },
+  });
+  return data;
+}
+
+// POST /api/social/publish-carousel — 2-10 images, each uploaded as a
+// non-published carousel item container, then wrapped in a parent
+// CAROUSEL container before the final publish call.
+async function postCarousel(imageUrls, caption) {
+  const conn = await getRawConnection();
+  if (!conn) return { status: 'skipped', reason: 'Instagram not connected — go to Settings to connect it.', sample: true };
+  if (!Array.isArray(imageUrls) || imageUrls.length < 2 || imageUrls.length > 10) {
+    return { status: 'skipped', reason: 'Instagram carousels need 2-10 images.', sample: true };
+  }
+  try {
+    const itemIds = [];
+    for (const imageUrl of imageUrls) {
+      const { data: item } = await axios.post(`${GRAPH}/${conn.external_account_id}/media`, null, {
+        params: { image_url: imageUrl, is_carousel_item: true, access_token: conn.access_token },
+      });
+      itemIds.push(item.id);
+    }
+    const { data: container } = await axios.post(`${GRAPH}/${conn.external_account_id}/media`, null, {
+      params: { media_type: 'CAROUSEL', children: itemIds.join(','), caption, access_token: conn.access_token },
+    });
+    const published = await publishContainer(conn, container.id);
+    return { status: 'success', externalPostId: published.id };
+  } catch (e) {
+    logger.error('instagramService.postCarousel failed', { error: e.response?.data || e.message });
+    return { status: 'failed', error: e.response?.data?.error?.message || e.message };
+  }
+}
+
+// POST /api/social/publish-reel — video_url must be a publicly reachable
+// .mp4; Graph API fetches and processes it asynchronously before it can be
+// published, so this polls the container's status_code briefly.
+async function postReel(videoUrl, caption) {
+  const conn = await getRawConnection();
+  if (!conn) return { status: 'skipped', reason: 'Instagram not connected — go to Settings to connect it.', sample: true };
+  if (!videoUrl) return { status: 'skipped', reason: 'Reels require a video URL — none was attached.', sample: true };
+  try {
+    const { data: container } = await axios.post(`${GRAPH}/${conn.external_account_id}/media`, null, {
+      params: { media_type: 'REELS', video_url: videoUrl, caption, access_token: conn.access_token },
+    });
+    await waitForContainerReady(conn, container.id);
+    const published = await publishContainer(conn, container.id);
+    return { status: 'success', externalPostId: published.id };
+  } catch (e) {
+    logger.error('instagramService.postReel failed', { error: e.response?.data || e.message });
+    return { status: 'failed', error: e.response?.data?.error?.message || e.message };
+  }
+}
+
+// POST /api/social/publish-story — an image or video Story; no caption field.
+async function postStory({ imageUrl, videoUrl }) {
+  const conn = await getRawConnection();
+  if (!conn) return { status: 'skipped', reason: 'Instagram not connected — go to Settings to connect it.', sample: true };
+  if (!imageUrl && !videoUrl) return { status: 'skipped', reason: 'Stories require an image or video URL.', sample: true };
+  try {
+    const params = { media_type: 'STORIES', access_token: conn.access_token };
+    if (videoUrl) params.video_url = videoUrl;
+    else params.image_url = imageUrl;
+    const { data: container } = await axios.post(`${GRAPH}/${conn.external_account_id}/media`, null, { params });
+    if (videoUrl) await waitForContainerReady(conn, container.id);
+    const published = await publishContainer(conn, container.id);
+    return { status: 'success', externalPostId: published.id };
+  } catch (e) {
+    logger.error('instagramService.postStory failed', { error: e.response?.data || e.message });
+    return { status: 'failed', error: e.response?.data?.error?.message || e.message };
+  }
+}
+
+// Video containers process asynchronously — poll status_code until it's no
+// longer IN_PROGRESS (Meta's own recommended pattern), capped so a stalled
+// upload can't hang the request forever.
+async function waitForContainerReady(conn, containerId, { maxAttempts = 10, delayMs = 3000 } = {}) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const { data } = await axios.get(`${GRAPH}/${containerId}`, {
+      params: { fields: 'status_code', access_token: conn.access_token },
+    });
+    if (data.status_code === 'FINISHED') return true;
+    if (data.status_code === 'ERROR') throw new Error('Instagram media processing failed (status_code=ERROR)');
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  throw new Error('Instagram media still processing after the wait window — try publishing again shortly.');
+}
+
+async function getAccountInsights() {
+  const conn = await getRawConnection();
+  if (!conn) {
+    return { sample: true, reach: 4200, impressions: 6800, followerCount: 812, profileViews: 190 };
+  }
+  try {
+    const { data } = await axios.get(`${GRAPH}/${conn.external_account_id}/insights`, {
+      params: { metric: 'reach,impressions,profile_views', period: 'day', access_token: conn.access_token },
+    });
+    const metrics = (data.data || []).reduce((acc, m) => {
+      const total = (m.values || []).reduce((sum, v) => sum + (v.value || 0), 0);
+      acc[m.name] = total;
+      return acc;
+    }, {});
+    const { data: account } = await axios.get(`${GRAPH}/${conn.external_account_id}`, {
+      params: { fields: 'followers_count,media_count', access_token: conn.access_token },
+    });
+    return {
+      reach: metrics.reach || 0,
+      impressions: metrics.impressions || 0,
+      profileViews: metrics.profile_views || 0,
+      followerCount: account.followers_count,
+      mediaCount: account.media_count,
+    };
+  } catch (e) {
+    logger.error('instagramService.getAccountInsights failed', { error: e.response?.data || e.message });
+    throw Object.assign(new Error(`Instagram insights fetch failed: ${e.response?.data?.error?.message || e.message}`), { status: 502 });
+  }
+}
+
+async function getMedia({ limit = 25 } = {}) {
+  const conn = await getRawConnection();
+  if (!conn) {
+    return [{
+      id: 'sample-media-1', caption: 'Behind the scenes building AlphoTech', mediaType: 'IMAGE',
+      permalink: 'https://instagram.com', timestamp: new Date().toISOString(),
+      likeCount: 42, commentsCount: 5, sample: true,
+    }];
+  }
+  try {
+    const { data } = await axios.get(`${GRAPH}/${conn.external_account_id}/media`, {
+      params: {
+        fields: 'id,caption,media_type,permalink,timestamp,like_count,comments_count,thumbnail_url,media_url',
+        limit,
+        access_token: conn.access_token,
+      },
+    });
+    return (data.data || []).map((m) => ({
+      id: m.id,
+      caption: m.caption || '',
+      mediaType: m.media_type,
+      permalink: m.permalink,
+      timestamp: m.timestamp,
+      likeCount: m.like_count || 0,
+      commentsCount: m.comments_count || 0,
+      thumbnailUrl: m.thumbnail_url || m.media_url || null,
+    }));
+  } catch (e) {
+    logger.error('instagramService.getMedia failed', { error: e.response?.data || e.message });
+    throw Object.assign(new Error(`Instagram media fetch failed: ${e.response?.data?.error?.message || e.message}`), { status: 502 });
+  }
+}
+
+async function getMediaInsights(mediaId) {
+  const conn = await getRawConnection();
+  if (!conn) return { sample: true, reach: 900, impressions: 1400, engagement: 120, saved: 8 };
+  try {
+    const { data } = await axios.get(`${GRAPH}/${mediaId}/insights`, {
+      params: { metric: 'reach,impressions,engagement,saved', access_token: conn.access_token },
+    });
+    return (data.data || []).reduce((acc, m) => {
+      acc[m.name] = (m.values || [])[0]?.value || 0;
+      return acc;
+    }, {});
+  } catch (e) {
+    logger.error('instagramService.getMediaInsights failed', { error: e.response?.data || e.message });
+    throw Object.assign(new Error(`Instagram media insights fetch failed: ${e.response?.data?.error?.message || e.message}`), { status: 502 });
+  }
+}
+
+async function getComments(mediaId) {
+  const conn = await getRawConnection();
+  if (!conn) return [{ id: 'sample-comment-1', text: 'This is exactly what we needed, DMing you', username: 'founder_dev', sample: true }];
+  try {
+    const { data } = await axios.get(`${GRAPH}/${mediaId}/comments`, {
+      params: { fields: 'id,text,username,timestamp,like_count', access_token: conn.access_token },
+    });
+    return (data.data || []).map((c) => ({
+      id: c.id, text: c.text, username: c.username, timestamp: c.timestamp, likeCount: c.like_count || 0,
+    }));
+  } catch (e) {
+    logger.error('instagramService.getComments failed', { error: e.response?.data || e.message });
+    throw Object.assign(new Error(`Instagram comments fetch failed: ${e.response?.data?.error?.message || e.message}`), { status: 502 });
+  }
+}
+
+module.exports = {
+  isAppConfigured, getAuthUrl, handleCallback, isConnected, status, disconnect,
+  postImage, postCarousel, postReel, postStory,
+  getAccountInsights, getMedia, getMediaInsights, getComments,
+};

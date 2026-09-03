@@ -3,6 +3,7 @@ const router = express.Router();
 const apolloService = require('../services/apolloService');
 const db = require('../db');
 const aiService = require('../services/aiService');
+const leadPipelineService = require('../services/leadPipelineService');
 const { asyncHandler, ok, clampScore } = require('../utils/helpers');
 const { strictLimiter } = require('../middleware/rateLimiter');
 
@@ -24,6 +25,7 @@ router.post('/import', asyncHandler(async (req, res) => {
   const candidate = req.body || {};
   const { score } = await aiService.scoreLead(candidate).catch(() => ({ score: aiService.heuristicScore(candidate) }));
   const lead = await db.insert('leads', { source: 'apollo', status: 'new', ...candidate, score: clampScore(score) });
+  leadPipelineService.onLeadCreated(lead).catch(() => {});
   ok(res, lead);
 }));
 

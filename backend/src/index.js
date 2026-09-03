@@ -40,6 +40,10 @@ api.use('/settings', require('./routes/settings'));
 api.use('/warroom', require('./routes/warRoom'));
 api.use('/intelligence', require('./routes/intelligence'));
 api.use('/social', require('./routes/social'));
+api.use('/reddit', require('./routes/reddit'));
+api.use('/calendar', require('./routes/calendar'));
+api.use('/upwork', require('./routes/upwork'));
+api.use('/clients', require('./routes/clients'));
 app.use('/api', api);
 
 app.use(notFoundHandler);

@@ -48,6 +48,7 @@ api.use('/reddit', require('./routes/reddit'));
 api.use('/calendar', require('./routes/calendar'));
 api.use('/upwork', require('./routes/upwork'));
 api.use('/clients', require('./routes/clients'));
+api.use('/notifications', require('./routes/notifications'));
 app.use('/api', api);
 
 app.use(notFoundHandler);

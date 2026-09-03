@@ -2,6 +2,7 @@ const config = require('../config');
 const db = require('../db');
 const aiService = require('./aiService');
 const apolloService = require('./apolloService');
+const notificationService = require('./notificationService');
 const logger = require('../utils/logger');
 
 // Workflow 4 ("The Lead Pipeline") — called once, right after a lead is
@@ -37,6 +38,16 @@ async function onLeadCreated(lead) {
     });
 
     logger.info(`leadPipeline: score ${lead.score} lead ${lead.id} (${lead.company || lead.name}) — brief + outreach draft ready`);
+
+    // Fire-and-forget — a failed push shouldn't fail the lead pipeline itself.
+    notificationService
+      .sendPush({
+        title: `🔥 Score ${lead.score} lead: ${lead.company || lead.name}`,
+        body: 'AI brief + outreach draft ready — open CLA to review.',
+        data: { type: 'hot_lead', leadId: lead.id },
+      })
+      .catch((e) => logger.warn('leadPipeline: push notification failed', { error: e.message }));
+
     return { brief, outreachDraft };
   } catch (e) {
     logger.warn('leadPipeline.onLeadCreated failed', { leadId: lead.id, error: e.message });

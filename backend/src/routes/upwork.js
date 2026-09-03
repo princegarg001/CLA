@@ -48,6 +48,7 @@ router.post('/jobs', strictLimiter, asyncHandler(async (req, res) => {
     ai_proposal: proposal,
     status: 'new',
   });
+  upworkService.notifyIfHot(job);
   ok(res, job);
 }));
 

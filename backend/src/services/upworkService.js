@@ -1,5 +1,6 @@
 const config = require('../config');
 const aiService = require('./aiService');
+const notificationService = require('./notificationService');
 const logger = require('../utils/logger');
 
 // Upwork killed RSS in 2024 and bans automated applying — the only leverage
@@ -104,4 +105,19 @@ async function generateProposal(job) {
   );
 }
 
-module.exports = { parseJobWebhook, passesBaseline, scoreJob, heuristicScore, generateProposal };
+// Single hook called after every upwork_jobs insert (routes/upwork.js manual
+// add, webhooks.js Vollna + email forwards) — mirrors leadPipelineService's
+// onLeadCreated shape so "score 8+ → push notification" behaves identically
+// across leads and Upwork jobs rather than being reimplemented per intake path.
+function notifyIfHot(job) {
+  if (!job || (job.ai_score || 0) < 8) return;
+  notificationService
+    .sendPush({
+      title: `💼 Score ${job.ai_score} Upwork job: ${job.title}`,
+      body: job.client_name ? `Client: ${job.client_name} — proposal drafted, open CLA to review.` : 'Proposal drafted — open CLA to review.',
+      data: { type: 'hot_upwork_job', jobId: job.id },
+    })
+    .catch((e) => logger.warn('upworkService.notifyIfHot: push notification failed', { error: e.message }));
+}
+
+module.exports = { parseJobWebhook, passesBaseline, scoreJob, heuristicScore, generateProposal, notifyIfHot };

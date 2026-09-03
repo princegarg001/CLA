@@ -394,6 +394,19 @@ create table if not exists testimonials (
 );
 create index if not exists idx_testimonials_client on testimonials (client_id);
 
+-- ---------------------------------------------------------------------------
+-- device_tokens — FCM push tokens. Single-user tool, but still keyed by
+-- token (not a fixed row) so an app reinstall / token rotation just upserts
+-- a new row rather than needing "the" one row updated in place.
+-- ---------------------------------------------------------------------------
+create table if not exists device_tokens (
+  id uuid primary key default uuid_generate_v4(),
+  token text not null unique,
+  platform text not null default 'android', -- android | ios
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 -- referred_by references `clients`, which is defined after `leads` above —
 -- added here via ALTER rather than inline in leads' own CREATE TABLE so the
 -- forward reference resolves. Also safe to re-run on a DB that already has
@@ -435,12 +448,13 @@ alter table milestones enable row level security;
 alter table invoices enable row level security;
 alter table communication_log enable row level security;
 alter table testimonials enable row level security;
+alter table device_tokens enable row level security;
 
 do $$
 declare
   t text;
 begin
-  for t in select unnest(array['leads','deals','sequences','messages','templates','settings','icp_profiles','scheduled_posts','agent_runs','oauth_connections','social_posts','content_calendar','upwork_jobs','clients','projects','milestones','invoices','communication_log','testimonials'])
+  for t in select unnest(array['leads','deals','sequences','messages','templates','settings','icp_profiles','scheduled_posts','agent_runs','oauth_connections','social_posts','content_calendar','upwork_jobs','clients','projects','milestones','invoices','communication_log','testimonials','device_tokens'])
   loop
     execute format('drop policy if exists "service_role_all" on %I;', t);
     execute format(

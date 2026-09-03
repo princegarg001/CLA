@@ -59,6 +59,7 @@ router.post('/upwork', asyncHandler(async (req, res) => {
     ai_proposal: proposal,
     status: 'new',
   });
+  upworkService.notifyIfHot(job);
   ok(res, job);
 }));
 
@@ -77,6 +78,7 @@ router.post('/email', asyncHandler(async (req, res) => {
     const { score, reason } = await upworkService.scoreJob(job);
     const proposal = score >= 6 ? await upworkService.generateProposal(job) : null;
     const inserted = await db.insert('upwork_jobs', { ...job, ai_score: clampScore(score), ai_score_reason: reason, ai_proposal: proposal, status: 'new' });
+    upworkService.notifyIfHot(inserted);
     return ok(res, inserted);
   }
 

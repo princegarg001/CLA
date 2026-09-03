@@ -119,6 +119,13 @@ const config = {
     'Python', 'Node.js', 'Backend', 'DevOps', 'Microservices', 'API', 'Automation',
   ]),
   upworkMinBudget: parseInt(process.env.UPWORK_MIN_BUDGET || '500', 10),
+
+  // ---- Push notifications (Firebase Cloud Messaging) -------------------------
+  // The whole downloaded service-account JSON, pasted as one env var — Render
+  // has no file upload, so this matches how every other multi-field secret in
+  // this app is handled. Parsed lazily in notificationService.js so a
+  // malformed value degrades to logging instead of crashing the process.
+  firebaseServiceAccountJson: process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '',
 };
 
 // isConfigured('apollo') -> true if APOLLO_API_KEY is set, etc.
@@ -163,6 +170,7 @@ const CHECKS = {
   // webhook secret is set, so an inbound feed can be verified rather than
   // accepted from anyone who finds the URL.
   upwork: () => !!config.upworkWebhookSecret,
+  firebase: () => !!config.firebaseServiceAccountJson,
 };
 
 config.isConfigured = (name) => (CHECKS[name] ? CHECKS[name]() : false);

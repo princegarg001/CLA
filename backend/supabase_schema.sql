@@ -79,7 +79,7 @@ create index if not exists idx_sequences_lead on sequences (lead_id);
 create table if not exists messages (
   id uuid primary key default uuid_generate_v4(),
   lead_id uuid references leads(id) on delete cascade,
-  channel text not null, -- apollo_email | twitter_dm | contra | solidgigs | contact_form | whatsapp
+  channel text not null, -- apollo_email | twitter_dm | contra | solidgigs | contact_form | whatsapp | email
   direction text not null default 'outbound', -- outbound | inbound
   tone text, -- technical | casual | formal | founder_to_founder
   market text, -- US | UK | EU
@@ -91,6 +91,9 @@ create table if not exists messages (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+-- client_id is added further down via ALTER, once `clients` exists (this
+-- table is defined before `clients` in the file, so an inline forward
+-- reference here would fail on a fresh database).
 create index if not exists idx_messages_lead on messages (lead_id);
 create index if not exists idx_messages_channel on messages (channel);
 
@@ -310,9 +313,14 @@ create table if not exists projects (
   completed_date date,
   source text, -- upwork | contra | solidgigs | apollo | direct
   contract_url text,
+  -- Set once cron/referralFollowUp.js drafts the post-completion thank-you/
+  -- referral message, so a daily cron doesn't re-draft the same project
+  -- every day it stays completed.
+  referral_followup_drafted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+alter table projects add column if not exists referral_followup_drafted_at timestamptz;
 create index if not exists idx_projects_client on projects (client_id);
 create index if not exists idx_projects_status on projects (status);
 
@@ -372,6 +380,34 @@ create table if not exists communication_log (
 create index if not exists idx_comm_log_client on communication_log (client_id, created_at desc);
 
 -- ---------------------------------------------------------------------------
+-- testimonials — quotes from clients, tagged for reuse in proposals/outreach
+-- (Growth Studio's Automation Engine, Outreach Composer, Upwork proposals).
+-- ---------------------------------------------------------------------------
+create table if not exists testimonials (
+  id uuid primary key default uuid_generate_v4(),
+  client_id uuid not null references clients(id) on delete cascade,
+  quote text not null,
+  author_name text,
+  author_title text,
+  tags text[] default '{}',
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_testimonials_client on testimonials (client_id);
+
+-- referred_by references `clients`, which is defined after `leads` above —
+-- added here via ALTER rather than inline in leads' own CREATE TABLE so the
+-- forward reference resolves. Also safe to re-run on a DB that already has
+-- both tables from an earlier version of this file.
+alter table leads add column if not exists referred_by uuid references clients(id);
+-- Running credit owed for referrals a client has sent — a single balance,
+-- not a full transaction ledger (nothing here processes payouts).
+alter table clients add column if not exists referral_credit_owed numeric not null default 0;
+-- messages.client_id: see the comment on `messages` above for why this is
+-- an ALTER rather than an inline column.
+alter table messages add column if not exists client_id uuid references clients(id) on delete cascade;
+create index if not exists idx_messages_client on messages (client_id);
+
+-- ---------------------------------------------------------------------------
 -- Row Level Security
 -- This is a single-tenant founder tool. RLS is enabled with a service-role-only
 -- policy, so the backend MUST connect using the "service_role" key (Project
@@ -398,12 +434,13 @@ alter table projects enable row level security;
 alter table milestones enable row level security;
 alter table invoices enable row level security;
 alter table communication_log enable row level security;
+alter table testimonials enable row level security;
 
 do $$
 declare
   t text;
 begin
-  for t in select unnest(array['leads','deals','sequences','messages','templates','settings','icp_profiles','scheduled_posts','agent_runs','oauth_connections','social_posts','content_calendar','upwork_jobs','clients','projects','milestones','invoices','communication_log'])
+  for t in select unnest(array['leads','deals','sequences','messages','templates','settings','icp_profiles','scheduled_posts','agent_runs','oauth_connections','social_posts','content_calendar','upwork_jobs','clients','projects','milestones','invoices','communication_log','testimonials'])
   loop
     execute format('drop policy if exists "service_role_all" on %I;', t);
     execute format(

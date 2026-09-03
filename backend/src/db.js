@@ -9,6 +9,7 @@ const TABLES = [
   'settings', 'icp_profiles', 'scheduled_posts', 'agent_runs',
   'oauth_connections', 'social_posts', 'content_calendar', 'upwork_jobs',
   'clients', 'projects', 'milestones', 'invoices', 'communication_log',
+  'testimonials',
 ];
 
 const DB_FILE = path.resolve(__dirname, '..', 'data', 'db.json');

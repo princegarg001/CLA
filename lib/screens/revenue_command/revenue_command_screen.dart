@@ -53,6 +53,8 @@ class _RevenueCommandScreenState extends State<RevenueCommandScreen> {
                 const SizedBox(height: 4),
                 _buildSourceBreakdown(provider),
                 const SizedBox(height: 4),
+                _buildReferrals(provider),
+                const SizedBox(height: 4),
                 _buildMrrHealth(provider),
                 const SizedBox(height: 4),
                 _buildRecentDeals(provider),
@@ -261,6 +263,44 @@ class _RevenueCommandScreenState extends State<RevenueCommandScreen> {
                 ),
               );
             }).toList(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReferrals(RevenueProvider provider) {
+    final referrals = provider.summary?.referrals;
+    if (referrals == null || referrals.leadCount == 0) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(title: 'Referrals'),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: StatCard(
+                  icon: Icons.group_add_rounded,
+                  label: 'Referred Leads',
+                  value: '${referrals.leadCount}',
+                  iconBgColor: const Color(0xFF7C4DFF).withValues(alpha: 0.12),
+                  iconColor: const Color(0xFF7C4DFF),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: StatCard(
+                  icon: Icons.volunteer_activism_rounded,
+                  label: 'Referral Revenue',
+                  value: '\$${referrals.revenue.toStringAsFixed(0)}',
+                  iconBgColor: AppColors.success.withValues(alpha: 0.12),
+                  iconColor: AppColors.success,
+                ),
+              ),
+            ],
           ),
         ),
       ],

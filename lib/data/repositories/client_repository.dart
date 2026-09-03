@@ -106,4 +106,14 @@ class ClientRepository {
     });
     return CommunicationLogEntry.fromJson(data as Map<String, dynamic>);
   }
+
+  Future<Testimonial> addTestimonial(String clientId, {required String quote, String? authorName, String? authorTitle, List<String>? tags}) async {
+    final data = await _client.post('/clients/$clientId/testimonials', body: {
+      'quote': quote,
+      'authorName': authorName,
+      'authorTitle': authorTitle,
+      'tags': tags,
+    });
+    return Testimonial.fromJson(data as Map<String, dynamic>);
+  }
 }

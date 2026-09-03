@@ -56,6 +56,21 @@ class Deal {
       };
 }
 
+/// The referral-attribution block inside GET /api/revenue/summary.
+class ReferralStats {
+  final int leadCount;
+  final int clientCount;
+  final num revenue;
+
+  ReferralStats({this.leadCount = 0, this.clientCount = 0, this.revenue = 0});
+
+  factory ReferralStats.fromJson(Map<String, dynamic> json) => ReferralStats(
+        leadCount: (json['leadCount'] as num?)?.toInt() ?? 0,
+        clientCount: (json['clientCount'] as num?)?.toInt() ?? 0,
+        revenue: (json['revenue'] as num?) ?? 0,
+      );
+}
+
 /// GET /api/revenue/summary
 class RevenueSummary {
   final num mrr;
@@ -65,6 +80,7 @@ class RevenueSummary {
   final num avgDealSize;
   final int dealCount;
   final Map<String, num> revenueBySource;
+  final ReferralStats referrals;
 
   RevenueSummary({
     required this.mrr,
@@ -74,6 +90,7 @@ class RevenueSummary {
     required this.avgDealSize,
     required this.dealCount,
     required this.revenueBySource,
+    required this.referrals,
   });
 
   factory RevenueSummary.fromJson(Map<String, dynamic> json) => RevenueSummary(
@@ -84,5 +101,6 @@ class RevenueSummary {
         avgDealSize: (json['avgDealSize'] as num?) ?? 0,
         dealCount: (json['dealCount'] as num?)?.toInt() ?? 0,
         revenueBySource: (json['revenueBySource'] as Map?)?.map((k, v) => MapEntry(k.toString(), v as num)) ?? const {},
+        referrals: ReferralStats.fromJson((json['referrals'] as Map?)?.cast<String, dynamic>() ?? const {}),
       );
 }

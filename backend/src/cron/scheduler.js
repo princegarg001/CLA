@@ -12,6 +12,8 @@ const postScheduler = require('./postScheduler');
 const contentCalendar = require('./contentCalendar');
 const clientHealth = require('./clientHealth');
 const gumroadFollowUp = require('./gumroadFollowUp');
+const referralFollowUp = require('./referralFollowUp');
+const clientCheckIn = require('./clientCheckIn');
 
 function wrap(name, job) {
   return async () => {
@@ -43,6 +45,8 @@ function start() {
     cron.schedule('0 20 * * 0', wrap('contentCalendar', contentCalendar)),   // Sunday 8pm — "The Publisher" weekly auto-fill
     cron.schedule('0 8 * * *', wrap('clientHealth', clientHealth)),          // daily 8am — "The Client Guardian"
     cron.schedule('0 */6 * * *', wrap('gumroadFollowUp', gumroadFollowUp)),  // every 6 hours — Workflow 4's 48h Gumroad auto-follow-up
+    cron.schedule('0 9 * * *', wrap('referralFollowUp', referralFollowUp)),  // daily 9am — post-project thank-you/referral drafts
+    cron.schedule('0 9 1 * *', wrap('clientCheckIn', clientCheckIn)),        // 9am on the 1st of each month — check-in drafts
   ];
 
   logger.info(`cron: ${tasks.length} scheduled jobs started`);

@@ -26,13 +26,13 @@ async function onLeadCreated(lead) {
 
     await db.update('leads', lead.id, { ai_brief: brief });
     await db.insert('messages', {
-      leadId: lead.id,
+      lead_id: lead.id,
       channel: inferChannel(lead),
       tone: 'founder_to_founder',
       market: lead.region || 'US',
       body: outreachDraft,
       direction: 'outbound',
-      aiGenerated: true,
+      ai_generated: true,
       status: 'draft',
     });
 

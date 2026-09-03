@@ -22,6 +22,17 @@ router.get('/health', asyncHandler(async (req, res) => {
   ok(res, await clientService.rescoreAllActiveClients());
 }));
 
+// GET /api/clients/testimonials?tag= — every testimonial across all clients,
+// for the one-tap-copy-into-proposal use case (Upwork proposals, Apollo
+// outreach) where you don't want to hunt through each client individually.
+// Placed before /:id so Express doesn't treat "testimonials" as a client id.
+router.get('/testimonials', asyncHandler(async (req, res) => {
+  const { tag } = req.query;
+  let testimonials = await db.list('testimonials', { orderBy: { column: 'created_at', ascending: false } });
+  if (tag) testimonials = testimonials.filter((t) => (t.tags || []).includes(tag));
+  ok(res, testimonials);
+}));
+
 // POST /api/clients/convert/:leadId — the locking transition: lead becomes a
 // client, the source lead is locked so it stops resurfacing anywhere else.
 router.post('/convert/:leadId', asyncHandler(async (req, res) => {
@@ -52,16 +63,17 @@ router.post('/', asyncHandler(async (req, res) => {
   ok(res, client);
 }));
 
-// GET /api/clients/:id — full profile: client + projects + invoices + recent timeline.
+// GET /api/clients/:id — full profile: client + projects + invoices + recent timeline + testimonials.
 router.get('/:id', asyncHandler(async (req, res) => {
   const client = await db.get('clients', req.params.id);
   if (!client) return fail(res, 404, 'Client not found');
-  const [projects, invoices, communications] = await Promise.all([
+  const [projects, invoices, communications, testimonials] = await Promise.all([
     db.list('projects', { filters: { client_id: client.id }, orderBy: { column: 'created_at', ascending: false } }),
     db.list('invoices', { filters: { client_id: client.id }, orderBy: { column: 'created_at', ascending: false } }),
     db.list('communication_log', { filters: { client_id: client.id }, orderBy: { column: 'created_at', ascending: false }, limit: 20 }),
+    db.list('testimonials', { filters: { client_id: client.id }, orderBy: { column: 'created_at', ascending: false } }),
   ]);
-  ok(res, { ...client, projects, invoices, recentTimeline: communications });
+  ok(res, { ...client, projects, invoices, recentTimeline: communications, testimonials });
 }));
 
 router.patch('/:id', asyncHandler(async (req, res) => {
@@ -183,6 +195,31 @@ router.patch('/:id/invoices/:iid', asyncHandler(async (req, res) => {
     }
   }
   ok(res, updated);
+}));
+
+// ---- Testimonials ---------------------------------------------------------------
+
+router.post('/:id/testimonials', asyncHandler(async (req, res) => {
+  const client = await db.get('clients', req.params.id);
+  if (!client) return fail(res, 404, 'Client not found');
+  const body = req.body || {};
+  if (!body.quote) return fail(res, 400, 'quote is required');
+  const testimonial = await db.insert('testimonials', {
+    client_id: client.id,
+    quote: body.quote,
+    author_name: body.authorName || client.name,
+    author_title: body.authorTitle || null,
+    tags: body.tags || [],
+  });
+  ok(res, testimonial);
+}));
+
+router.get('/:id/testimonials', asyncHandler(async (req, res) => {
+  const testimonials = await db.list('testimonials', {
+    filters: { client_id: req.params.id },
+    orderBy: { column: 'created_at', ascending: false },
+  });
+  ok(res, testimonials);
 }));
 
 // ---- Timeline / communications ------------------------------------------------

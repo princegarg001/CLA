@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_colors.dart';
@@ -39,7 +40,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
           ),
           const SizedBox(height: 4),
           AppTabBar(
-            tabs: const ['Overview', 'Projects', 'Timeline', 'Invoices'],
+            tabs: const ['Overview', 'Projects', 'Timeline', 'Invoices', 'Testimonials'],
             selectedIndex: _selectedTab,
             onTap: (i) => setState(() => _selectedTab = i),
           ),
@@ -58,6 +59,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                         _ProjectsTab(client: client),
                         _TimelineTab(client: client),
                         _InvoicesTab(client: client),
+                        _TestimonialsTab(client: client),
                       ],
                     ),
                   ),
@@ -514,5 +516,102 @@ class _InvoicesTab extends StatelessWidget {
     final amount = num.tryParse(amountController.text);
     if (result != true || amount == null || !context.mounted) return;
     await context.read<ClientProvider>().addInvoice(client.id, amount: amount);
+  }
+}
+
+class _TestimonialsTab extends StatelessWidget {
+  final Client client;
+  const _TestimonialsTab({required this.client});
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AccentButton(label: 'Add Testimonial', icon: Icons.format_quote_rounded, onPressed: () => _addTestimonialDialog(context)),
+          const SizedBox(height: 12),
+          if (client.testimonials.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: Center(
+                child: Text(
+                  'No testimonials yet — ask after a project wraps up.',
+                  style: GoogleFonts.inter(color: AppColors.textTertiary),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            )
+          else
+            ...client.testimonials.map((t) => _buildTestimonialCard(context, t)),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTestimonialCard(BuildContext context, Testimonial testimonial) {
+    return AppCard(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('"${testimonial.quote}"', style: GoogleFonts.inter(fontSize: 14, fontStyle: FontStyle.italic, color: AppColors.textPrimary, height: 1.4)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  [testimonial.authorName, testimonial.authorTitle].where((s) => s != null && s.isNotEmpty).join(' · '),
+                  style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
+                ),
+              ),
+              // One-tap copy for pasting straight into an Upwork proposal or
+              // Apollo outreach draft — the whole point of the testimonial bank.
+              GestureDetector(
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: '"${testimonial.quote}" — ${testimonial.authorName ?? client.name}'));
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied to clipboard'), duration: Duration(seconds: 1)));
+                },
+                child: const Icon(Icons.copy_rounded, size: 16, color: AppColors.textTertiary),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _addTestimonialDialog(BuildContext context) async {
+    final quoteController = TextEditingController();
+    final authorController = TextEditingController(text: client.name);
+    final titleController = TextEditingController();
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Add Testimonial', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: quoteController, maxLines: 3, decoration: const InputDecoration(hintText: 'The quote')),
+            TextField(controller: authorController, decoration: const InputDecoration(hintText: 'Author name')),
+            TextField(controller: titleController, decoration: const InputDecoration(hintText: 'Author title (optional)')),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (result != true || quoteController.text.trim().isEmpty || !context.mounted) return;
+    await context.read<ClientProvider>().addTestimonial(
+          client.id,
+          quote: quoteController.text.trim(),
+          authorName: authorController.text.trim().isEmpty ? null : authorController.text.trim(),
+          authorTitle: titleController.text.trim().isEmpty ? null : titleController.text.trim(),
+        );
   }
 }

@@ -24,6 +24,7 @@ class Client {
   final List<Project> projects;
   final List<Invoice> invoices;
   final List<CommunicationLogEntry> recentTimeline;
+  final List<Testimonial> testimonials;
 
   Client({
     required this.id,
@@ -48,6 +49,7 @@ class Client {
     this.projects = const [],
     this.invoices = const [],
     this.recentTimeline = const [],
+    this.testimonials = const [],
   });
 
   factory Client.fromJson(Map<String, dynamic> json) => Client(
@@ -73,6 +75,38 @@ class Client {
         projects: (json['projects'] as List?)?.map((e) => Project.fromJson(e as Map<String, dynamic>)).toList() ?? const [],
         invoices: (json['invoices'] as List?)?.map((e) => Invoice.fromJson(e as Map<String, dynamic>)).toList() ?? const [],
         recentTimeline: (json['recentTimeline'] as List?)?.map((e) => CommunicationLogEntry.fromJson(e as Map<String, dynamic>)).toList() ?? const [],
+        testimonials: (json['testimonials'] as List?)?.map((e) => Testimonial.fromJson(e as Map<String, dynamic>)).toList() ?? const [],
+      );
+}
+
+/// Mirrors the `testimonials` table.
+class Testimonial {
+  final String id;
+  final String clientId;
+  final String quote;
+  final String? authorName;
+  final String? authorTitle;
+  final List<String> tags;
+  final DateTime? createdAt;
+
+  Testimonial({
+    required this.id,
+    required this.clientId,
+    required this.quote,
+    this.authorName,
+    this.authorTitle,
+    this.tags = const [],
+    this.createdAt,
+  });
+
+  factory Testimonial.fromJson(Map<String, dynamic> json) => Testimonial(
+        id: json['id']?.toString() ?? '',
+        clientId: json['client_id']?.toString() ?? '',
+        quote: json['quote']?.toString() ?? '',
+        authorName: json['author_name'] as String?,
+        authorTitle: json['author_title'] as String?,
+        tags: (json['tags'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+        createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
       );
 }
 

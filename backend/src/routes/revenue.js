@@ -27,7 +27,12 @@ router.post('/deals', asyncHandler(async (req, res) => {
 
 // GET /api/revenue/summary — combined MRR + project revenue + international split + runway
 router.get('/summary', asyncHandler(async (req, res) => {
-  const [mrr, deals] = await Promise.all([trustmrrService.getMrr(), db.list('deals')]);
+  const [mrr, deals, leads, clients] = await Promise.all([
+    trustmrrService.getMrr(),
+    db.list('deals'),
+    db.list('leads'),
+    db.list('clients'),
+  ]);
   const projectRevenue = deals.reduce((sum, d) => sum + (Number(d.value) || 0), 0);
   const bySource = deals.reduce((acc, d) => {
     const key = d.source || 'direct';
@@ -35,6 +40,14 @@ router.get('/summary', asyncHandler(async (req, res) => {
     return acc;
   }, {});
   const avgDealSize = deals.length ? projectRevenue / deals.length : 0;
+
+  // Referral dashboard: a lead is "referred" once leads.referred_by is set
+  // (routes/clients.js doesn't set this automatically — it's expected to be
+  // passed when creating the lead, e.g. from a "who referred you?" field).
+  const referredLeads = leads.filter((l) => l.referred_by);
+  const referredLeadIds = new Set(referredLeads.map((l) => l.id));
+  const referredClients = clients.filter((c) => c.lead_id && referredLeadIds.has(c.lead_id));
+  const referralRevenue = referredClients.reduce((sum, c) => sum + Number(c.total_revenue || 0), 0);
 
   ok(res, {
     mrr: mrr.mrr,
@@ -44,6 +57,11 @@ router.get('/summary', asyncHandler(async (req, res) => {
     avgDealSize,
     dealCount: deals.length,
     revenueBySource: bySource,
+    referrals: {
+      leadCount: referredLeads.length,
+      clientCount: referredClients.length,
+      revenue: referralRevenue,
+    },
   });
 }));
 

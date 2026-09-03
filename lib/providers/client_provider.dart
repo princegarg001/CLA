@@ -86,4 +86,10 @@ class ClientProvider extends ChangeNotifier with ViewStateMixin {
       });
 
   Future<String> reengageDraft(String clientId) => _repo.reengageDraft(clientId);
+
+  Future<bool> addTestimonial(String clientId, {required String quote, String? authorName, String? authorTitle, List<String>? tags}) =>
+      runAction(() async {
+        await _repo.addTestimonial(clientId, quote: quote, authorName: authorName, authorTitle: authorTitle, tags: tags);
+        await loadDetail(clientId);
+      });
 }

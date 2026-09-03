@@ -132,6 +132,46 @@ async function weeklyStrategicInsight(metrics) {
   );
 }
 
+const FALLBACK_WEEK_PLAN = [
+  { platform: 'twitter', postType: 'thread', dayOffset: 1, content: 'Hook: The hidden cost of skipping backend architecture reviews.\n\nBody 1...\nBody 2...\n\nCTA: DM me if this is you.' },
+  { platform: 'twitter', postType: 'thread', dayOffset: 3, content: 'Hook: Why most MVPs outgrow their backend in under 6 months.\n\nBody 1...\nBody 2...\n\nCTA: Let\'s talk if you\'re hitting this.' },
+  { platform: 'linkedin', postType: 'post', dayOffset: 2, content: 'A short thought-leadership post on backend reliability for funded startups. [AI unavailable — draft manually]' },
+  { platform: 'reddit', postType: 'post', dayOffset: 4, content: 'An educational, value-first post for r/SaaS or r/startups. [AI unavailable — draft manually]' },
+  { platform: 'instagram', postType: 'carousel', dayOffset: 5, content: 'Visual tips carousel concept: "3 signs your backend won\'t scale." [AI unavailable — draft manually]' },
+];
+
+// Workflow 2 ("The Publisher"): given last week's per-platform engagement,
+// generate 5 content pieces for the coming week — 2 Twitter threads, 1
+// LinkedIn post, 1 Reddit post, 1 Instagram carousel — per the fixed content
+// mix in the plan. Returns an array even on AI failure (a manual-draft
+// fallback set) so the calendar always gets filled with *something* to edit.
+async function generateWeeklyContentPlan(engagement) {
+  const text = await safeComplete(
+    {
+      system:
+        'You are a content strategist for AlphoTech, a backend engineering/automation studio for funded startups. ' +
+        'Given last week\'s engagement metrics across Twitter, LinkedIn, Reddit and Instagram, plan exactly 5 content pieces for ' +
+        'the coming week: 2 Twitter threads, 1 LinkedIn post, 1 Reddit post (educational, value-first, no self-promotion), ' +
+        '1 Instagram carousel concept. Base topics on what performed best last week when the data suggests something. ' +
+        'Respond with ONLY a JSON object: {"items": [{"platform": "twitter|linkedin|reddit|instagram", ' +
+        '"postType": "thread|post|carousel", "dayOffset": <1-7, days from today>, "content": "<the actual copy; ' +
+        'for a thread separate tweets with a blank line>"}]} — exactly 5 items.',
+      prompt: JSON.stringify(engagement || {}),
+      json: true,
+      maxTokens: 1400,
+    },
+    null
+  );
+  if (!text) return FALLBACK_WEEK_PLAN;
+  try {
+    const parsed = JSON.parse(text);
+    const items = Array.isArray(parsed.items) ? parsed.items : [];
+    return items.length ? items : FALLBACK_WEEK_PLAN;
+  } catch {
+    return FALLBACK_WEEK_PLAN;
+  }
+}
+
 module.exports = {
   complete,
   safeComplete,
@@ -141,4 +181,5 @@ module.exports = {
   generateOutreachMessage,
   generateTwitterThread,
   weeklyStrategicInsight,
+  generateWeeklyContentPlan,
 };

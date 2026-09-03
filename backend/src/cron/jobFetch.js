@@ -2,6 +2,7 @@ const db = require('../db');
 const webrobotsService = require('../services/webrobotsService');
 const headaiService = require('../services/headaiService');
 const aiService = require('../services/aiService');
+const leadPipelineService = require('../services/leadPipelineService');
 const logger = require('../utils/logger');
 const { clampScore } = require('../utils/helpers');
 
@@ -25,7 +26,8 @@ async function run() {
       intent_signal: `Open job posting: ${posting.title}`,
     };
     const { score } = await aiService.scoreLead(candidate).catch(() => ({ score: aiService.heuristicScore(candidate) }));
-    await db.insert('leads', { status: 'new', ...candidate, score: clampScore(score) });
+    const lead = await db.insert('leads', { status: 'new', ...candidate, score: clampScore(score) });
+    await leadPipelineService.onLeadCreated(lead);
     existingCompanies.add(company);
     created += 1;
   }
@@ -39,7 +41,8 @@ async function run() {
       urgency: 'high',
     };
     const { score } = await aiService.scoreLead(candidate).catch(() => ({ score: aiService.heuristicScore(candidate) }));
-    await db.insert('leads', { status: 'new', ...candidate, score: clampScore(score) });
+    const lead = await db.insert('leads', { status: 'new', ...candidate, score: clampScore(score) });
+    await leadPipelineService.onLeadCreated(lead);
     existingCompanies.add(company);
     created += 1;
   }

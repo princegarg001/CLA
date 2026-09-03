@@ -12,9 +12,28 @@ class SocialProvider extends ChangeNotifier with ViewStateMixin {
   List<PublishResult> lastResults = [];
   bool isPublishing = false;
 
+  InstagramInsights? instagramInsights;
+  List<InstagramMedia> instagramMedia = [];
+  bool isLoadingInstagram = false;
+
   Future<void> load() => runLoad(() async {
         status = await _repo.status();
       });
+
+  Future<void> loadInstagram() async {
+    isLoadingInstagram = true;
+    notifyListeners();
+    try {
+      final results = await Future.wait<Object>([_repo.instagramInsights(), _repo.instagramMedia()]);
+      instagramInsights = results[0] as InstagramInsights;
+      instagramMedia = results[1] as List<InstagramMedia>;
+    } catch (e) {
+      error = 'Instagram data failed to load: $e';
+    } finally {
+      isLoadingInstagram = false;
+      notifyListeners();
+    }
+  }
 
   /// Opens the platform's OAuth consent page in the phone's browser. The
   /// backend's callback stores the token server-side; the user comes back to
@@ -50,6 +69,19 @@ class SocialProvider extends ChangeNotifier with ViewStateMixin {
     notifyListeners();
     final ok = await runAction(() async {
       lastResults = await _repo.publish(text: text, imageUrl: imageUrl, platforms: platforms);
+      notifyListeners();
+    });
+    isPublishing = false;
+    notifyListeners();
+    return ok;
+  }
+
+  Future<bool> publishCarousel({required List<String> imageUrls, required String caption}) async {
+    isPublishing = true;
+    notifyListeners();
+    final ok = await runAction(() async {
+      final result = await _repo.publishCarousel(imageUrls: imageUrls, caption: caption);
+      lastResults = [result];
       notifyListeners();
     });
     isPublishing = false;

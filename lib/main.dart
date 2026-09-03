@@ -9,24 +9,32 @@ import 'core/theme/app_theme.dart';
 import 'data/repositories/agents_repository.dart';
 import 'data/repositories/analytics_repository.dart';
 import 'data/repositories/apollo_repository.dart';
+import 'data/repositories/calendar_repository.dart';
+import 'data/repositories/client_repository.dart';
 import 'data/repositories/freelance_repository.dart';
 import 'data/repositories/growth_repository.dart';
 import 'data/repositories/leads_repository.dart';
 import 'data/repositories/outreach_repository.dart';
+import 'data/repositories/reddit_repository.dart';
 import 'data/repositories/revenue_repository.dart';
 import 'data/repositories/settings_repository.dart';
 import 'data/repositories/social_repository.dart';
+import 'data/repositories/upwork_repository.dart';
 import 'data/repositories/war_room_repository.dart';
 import 'providers/agent_lab_provider.dart';
 import 'providers/analytics_provider.dart';
 import 'providers/apollo_provider.dart';
+import 'providers/calendar_provider.dart';
+import 'providers/client_provider.dart';
 import 'providers/freelance_provider.dart';
 import 'providers/growth_provider.dart';
 import 'providers/leads_provider.dart';
 import 'providers/outreach_provider.dart';
+import 'providers/reddit_provider.dart';
 import 'providers/revenue_provider.dart';
 import 'providers/settings_provider.dart';
 import 'providers/social_provider.dart';
+import 'providers/upwork_provider.dart';
 import 'providers/voice_auth_controller.dart';
 import 'providers/war_room_provider.dart';
 import 'screens/auth/auth_gate.dart';
@@ -34,6 +42,7 @@ import 'screens/war_room/war_room_screen.dart';
 import 'screens/apollo_hunter/apollo_hunter_screen.dart';
 import 'screens/freelance_radar/freelance_radar_screen.dart';
 import 'screens/growth_studio/growth_studio_screen.dart';
+import 'screens/client_vault/client_vault_screen.dart';
 import 'screens/ai_agent_lab/ai_agent_lab_screen.dart';
 import 'screens/revenue_command/revenue_command_screen.dart';
 import 'screens/analytics_tower/analytics_tower_screen.dart';
@@ -79,6 +88,10 @@ class CLAApp extends StatelessWidget {
         Provider(create: (context) => OutreachRepository(context.read<ApiClient>())),
         Provider(create: (context) => SettingsRepository(context.read<ApiClient>())),
         Provider(create: (context) => SocialRepository(context.read<ApiClient>())),
+        Provider(create: (context) => RedditRepository(context.read<ApiClient>())),
+        Provider(create: (context) => CalendarRepository(context.read<ApiClient>())),
+        Provider(create: (context) => UpworkRepository(context.read<ApiClient>())),
+        Provider(create: (context) => ClientRepository(context.read<ApiClient>())),
 
         // Screen providers — hold loading/error/data state for each of the 9 screens.
         ChangeNotifierProvider(create: (context) => LeadsProvider(context.read<LeadsRepository>())),
@@ -96,6 +109,10 @@ class CLAApp extends StatelessWidget {
         ChangeNotifierProvider(create: (context) => OutreachProvider(context.read<OutreachRepository>())),
         ChangeNotifierProvider(create: (context) => SettingsProvider(context.read<SettingsRepository>())),
         ChangeNotifierProvider(create: (context) => SocialProvider(context.read<SocialRepository>())),
+        ChangeNotifierProvider(create: (context) => RedditProvider(context.read<RedditRepository>())),
+        ChangeNotifierProvider(create: (context) => CalendarProvider(context.read<CalendarRepository>())),
+        ChangeNotifierProvider(create: (context) => UpworkProvider(context.read<UpworkRepository>())),
+        ChangeNotifierProvider(create: (context) => ClientProvider(context.read<ClientRepository>())),
       ],
       child: MaterialApp(
         title: 'AlphoTech CLA v2',
@@ -118,17 +135,20 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   int _currentIndex = 0;
   bool _showMoreMenu = false;
 
-  // All 9 screens
+  // All 10 screens. Client Vault takes Growth Studio's old primary-nav slot
+  // (active client management is higher-frequency than content creation) —
+  // Growth Studio moves into the More menu but stays one tap away.
   final List<Widget> _screens = const [
     WarRoomScreen(),           // 0 - War Room (home)
     ApolloHunterScreen(),      // 1 - Apollo Hunter
     FreelanceRadarScreen(),    // 2 - Freelance Radar
-    GrowthStudioScreen(),      // 3 - Growth Studio
-    AIAgentLabScreen(),        // 4 - AI Agent Lab
-    RevenueCommandScreen(),    // 5 - Revenue Command
-    AnalyticsTowerScreen(),    // 6 - Analytics Tower
-    OutreachComposerScreen(),  // 7 - Outreach Composer
-    SettingsScreen(),          // 8 - Settings
+    ClientVaultScreen(),       // 3 - Client Vault
+    GrowthStudioScreen(),      // 4 - Growth Studio
+    AIAgentLabScreen(),        // 5 - AI Agent Lab
+    RevenueCommandScreen(),    // 6 - Revenue Command
+    AnalyticsTowerScreen(),    // 7 - Analytics Tower
+    OutreachComposerScreen(),  // 8 - Outreach Composer
+    SettingsScreen(),          // 9 - Settings
   ];
 
   // Bottom nav shows 5 items (4 primary + More)
@@ -137,16 +157,17 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     _NavItem(Icons.grid_view_rounded, 'War Room', 0),
     _NavItem(Icons.rocket_launch_rounded, 'Apollo', 1),
     _NavItem(Icons.radar_rounded, 'Radar', 2),
-    _NavItem(Icons.campaign_rounded, 'Growth', 3),
+    _NavItem(Icons.shield_rounded, 'Clients', 3),
     _NavItem(Icons.more_horiz_rounded, 'More', -1),
   ];
 
   static const List<_NavItem> _moreItems = [
-    _NavItem(Icons.psychology_rounded, 'AI Agent Lab', 4),
-    _NavItem(Icons.account_balance_wallet_rounded, 'Revenue Command', 5),
-    _NavItem(Icons.analytics_rounded, 'Analytics Tower', 6),
-    _NavItem(Icons.edit_note_rounded, 'Outreach Composer', 7),
-    _NavItem(Icons.settings_rounded, 'Settings', 8),
+    _NavItem(Icons.campaign_rounded, 'Growth Studio', 4),
+    _NavItem(Icons.psychology_rounded, 'AI Agent Lab', 5),
+    _NavItem(Icons.account_balance_wallet_rounded, 'Revenue Command', 6),
+    _NavItem(Icons.analytics_rounded, 'Analytics Tower', 7),
+    _NavItem(Icons.edit_note_rounded, 'Outreach Composer', 8),
+    _NavItem(Icons.settings_rounded, 'Settings', 9),
   ];
 
   void _onNavTap(int navIndex) {

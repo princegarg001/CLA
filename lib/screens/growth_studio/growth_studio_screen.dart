@@ -3,10 +3,14 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_colors.dart';
+import '../../data/models/calendar_models.dart';
 import '../../data/models/growth_models.dart';
 import '../../data/models/lead.dart';
+import '../../data/models/reddit_models.dart';
 import '../../data/models/social_models.dart';
+import '../../providers/calendar_provider.dart';
 import '../../providers/growth_provider.dart';
+import '../../providers/reddit_provider.dart';
 import '../../providers/social_provider.dart';
 import '../../widgets/shared_components.dart';
 
@@ -43,27 +47,31 @@ class _GrowthStudioScreenState extends State<GrowthStudioScreen> {
           _buildHeader(provider),
           const SizedBox(height: 4),
           AppTabBar(
-            tabs: const ['Auto-Post', 'Twitter/X', 'Gumroad', 'BetaList'],
+            tabs: const ['Auto-Post', 'Calendar', 'Reddit', 'Instagram', 'Twitter/X', 'Gumroad', 'BetaList'],
             selectedIndex: _selectedTab,
             onTap: (i) => setState(() => _selectedTab = i),
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: _selectedTab == 0
-                ? const _AutoPostTab()
-                : provider.isLoading && provider.analytics == null
-                    ? const Center(child: CircularProgressIndicator())
-                    : RefreshIndicator(
-                        onRefresh: () => context.read<GrowthProvider>().load(),
-                        child: IndexedStack(
-                          index: _selectedTab - 1,
-                          children: [
-                            _buildTwitterTab(provider),
-                            _buildGumroadTab(provider),
-                            _buildBetaListTab(provider),
-                          ],
-                        ),
+            child: switch (_selectedTab) {
+              0 => const _AutoPostTab(),
+              1 => const _CalendarTab(),
+              2 => const _RedditTab(),
+              3 => const _InstagramTab(),
+              _ => provider.isLoading && provider.analytics == null
+                  ? const Center(child: CircularProgressIndicator())
+                  : RefreshIndicator(
+                      onRefresh: () => context.read<GrowthProvider>().load(),
+                      child: IndexedStack(
+                        index: _selectedTab - 4,
+                        children: [
+                          _buildTwitterTab(provider),
+                          _buildGumroadTab(provider),
+                          _buildBetaListTab(provider),
+                        ],
                       ),
+                    ),
+            },
           ),
         ],
       ),
@@ -570,4 +578,437 @@ class _AutoPostTabState extends State<_AutoPostTab> {
       ),
     );
   }
+}
+
+/// Reddit lead-gen tab — hot posts from monitored subreddits, pre-scored
+/// against ICP keywords, with one-tap AI draft + approve-to-post.
+class _RedditTab extends StatefulWidget {
+  const _RedditTab();
+
+  @override
+  State<_RedditTab> createState() => _RedditTabState();
+}
+
+class _RedditTabState extends State<_RedditTab> {
+  final Map<String, TextEditingController> _controllers = {};
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => context.read<RedditProvider>().load());
+  }
+
+  @override
+  void dispose() {
+    for (final c in _controllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  TextEditingController _controllerFor(String postId, String draft) {
+    return _controllers.putIfAbsent(postId, () => TextEditingController(text: draft));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reddit = context.watch<RedditProvider>();
+
+    if (reddit.isLoading && reddit.opportunities.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return RefreshIndicator(
+      onRefresh: () => context.read<RedditProvider>().load(),
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (reddit.karma != null)
+              Row(
+                children: [
+                  Expanded(child: StatCard(icon: Icons.forum_rounded, label: 'Comment Karma', value: '${reddit.karma!.commentKarma}')),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: StatCard(
+                      icon: Icons.trending_up_rounded,
+                      label: 'Link Karma',
+                      value: '${reddit.karma!.linkKarma}',
+                      iconBgColor: AppColors.accent.withValues(alpha: 0.12),
+                      iconColor: AppColors.accent,
+                    ),
+                  ),
+                ],
+              ),
+            const SizedBox(height: 12),
+            SectionHeader(
+              title: 'Lead Opportunities',
+              trailing: reddit.karma?.sample == true
+                  ? const StatusBadge(label: 'Sample data', bgColor: AppColors.warningLight, textColor: AppColors.warning)
+                  : null,
+            ),
+            if (reddit.opportunities.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text('No matching posts right now — pull to refresh.', style: GoogleFonts.inter(color: AppColors.textTertiary)),
+              )
+            else
+              ...reddit.opportunities.map((post) => _buildOpportunityCard(context, reddit, post)),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOpportunityCard(BuildContext context, RedditProvider reddit, RedditPost post) {
+    final isDrafting = reddit.draftingIds.contains(post.id);
+    final draft = reddit.drafts[post.id];
+
+    return AppCard(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(color: const Color(0xFFFF4500).withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6)),
+                child: Text('r/${post.subreddit}', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: const Color(0xFFFF4500))),
+              ),
+              const Spacer(),
+              if (post.keywordScore > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(color: AppColors.accent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
+                  child: Text('Fit ${post.keywordScore}/10', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.accent)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(post.title, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          if (post.body.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(post.body, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary), maxLines: 3, overflow: TextOverflow.ellipsis),
+          ],
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(Icons.arrow_upward_rounded, size: 13, color: AppColors.textTertiary),
+              Text(' ${post.score}', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textTertiary)),
+              const SizedBox(width: 12),
+              const Icon(Icons.comment_rounded, size: 13, color: AppColors.textTertiary),
+              Text(' ${post.numComments}', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textTertiary)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (draft == null)
+            OutlinedAccentButton(
+              label: isDrafting ? 'Drafting…' : 'Generate AI Reply',
+              icon: Icons.auto_awesome_rounded,
+              onPressed: isDrafting ? () {} : () => context.read<RedditProvider>().generateDraft(post),
+            )
+          else ...[
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: AppColors.surfaceBg, borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.border)),
+              child: TextField(
+                controller: _controllerFor(post.id, draft),
+                maxLines: null,
+                style: GoogleFonts.inter(fontSize: 12, color: AppColors.textPrimary),
+                decoration: const InputDecoration.collapsed(hintText: 'Edit the reply before posting…'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            AccentButton(
+              label: 'Post Reply',
+              icon: Icons.send_rounded,
+              isLoading: reddit.isLoading,
+              onPressed: () async {
+                final text = _controllerFor(post.id, draft).text.trim();
+                if (text.isEmpty) return;
+                final ok = await context.read<RedditProvider>().sendReply(post, text);
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(ok ? 'Reply posted' : (context.read<RedditProvider>().error ?? 'Reply failed'))),
+                );
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Instagram advanced tab — account insights + recent post performance.
+class _InstagramTab extends StatefulWidget {
+  const _InstagramTab();
+
+  @override
+  State<_InstagramTab> createState() => _InstagramTabState();
+}
+
+class _InstagramTabState extends State<_InstagramTab> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => context.read<SocialProvider>().loadInstagram());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final social = context.watch<SocialProvider>();
+
+    if (social.isLoadingInstagram && social.instagramInsights == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final insights = social.instagramInsights;
+    return RefreshIndicator(
+      onRefresh: () => context.read<SocialProvider>().loadInstagram(),
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (insights != null) ...[
+              Row(
+                children: [
+                  Expanded(child: StatCard(icon: Icons.visibility_rounded, label: 'Reach', value: '${insights.reach}')),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: StatCard(
+                      icon: Icons.bar_chart_rounded,
+                      label: 'Impressions',
+                      value: '${insights.impressions}',
+                      iconBgColor: AppColors.accent.withValues(alpha: 0.12),
+                      iconColor: AppColors.accent,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(child: StatCard(icon: Icons.people_rounded, label: 'Followers', value: '${insights.followerCount ?? '—'}')),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: StatCard(
+                      icon: Icons.person_search_rounded,
+                      label: 'Profile Views',
+                      value: '${insights.profileViews}',
+                      iconBgColor: AppColors.warning.withValues(alpha: 0.12),
+                      iconColor: AppColors.warning,
+                    ),
+                  ),
+                ],
+              ),
+              if (insights.sample) ...[
+                const SizedBox(height: 10),
+                const StatusBadge(label: 'Sample data — connect Instagram in Settings', bgColor: AppColors.warningLight, textColor: AppColors.warning),
+              ],
+            ],
+            const SizedBox(height: 8),
+            const SectionHeader(title: 'Recent Posts'),
+            if (social.instagramMedia.isEmpty)
+              Text('No posts yet.', style: GoogleFonts.inter(color: AppColors.textTertiary))
+            else
+              ...social.instagramMedia.map((m) => AppCard(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE1306C).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                            image: m.thumbnailUrl != null ? DecorationImage(image: NetworkImage(m.thumbnailUrl!), fit: BoxFit.cover) : null,
+                          ),
+                          child: m.thumbnailUrl == null ? const Icon(Icons.image_rounded, color: Color(0xFFE1306C), size: 20) : null,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(m.caption.isEmpty ? '(no caption)' : m.caption, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textPrimary), maxLines: 2, overflow: TextOverflow.ellipsis),
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  const Icon(Icons.favorite_rounded, size: 12, color: AppColors.textTertiary),
+                                  Text(' ${m.likeCount}  ', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textTertiary)),
+                                  const Icon(Icons.comment_rounded, size: 12, color: AppColors.textTertiary),
+                                  Text(' ${m.commentsCount}', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textTertiary)),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  )),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Unified content calendar — every scheduled post across every platform,
+/// with a one-tap "Fill Week" AI auto-plan.
+class _CalendarTab extends StatefulWidget {
+  const _CalendarTab();
+
+  @override
+  State<_CalendarTab> createState() => _CalendarTabState();
+}
+
+class _CalendarTabState extends State<_CalendarTab> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => context.read<CalendarProvider>().load());
+  }
+
+  static const Map<String, Color> _platformColors = {
+    'twitter': Color(0xFF1DA1F2),
+    'linkedin': Color(0xFF0077B5),
+    'instagram': Color(0xFFE1306C),
+    'reddit': Color(0xFFFF4500),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final calendar = context.watch<CalendarProvider>();
+
+    if (calendar.isLoading && calendar.entries.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return RefreshIndicator(
+      onRefresh: () => context.read<CalendarProvider>().load(),
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AccentButton(
+              label: 'Fill Week with AI',
+              icon: Icons.auto_awesome_rounded,
+              isLoading: calendar.isFillingWeek,
+              onPressed: () async {
+                final created = await context.read<CalendarProvider>().fillWeek();
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Drafted $created posts for the coming week')));
+              },
+            ),
+            const SizedBox(height: 12),
+            const SectionHeader(title: 'Scheduled & Drafts'),
+            if (calendar.entries.isEmpty)
+              Text('Nothing on the calendar yet.', style: GoogleFonts.inter(color: AppColors.textTertiary))
+            else
+              ...calendar.entries.map((e) => _buildEntryCard(context, e)),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEntryCard(BuildContext context, CalendarEntry entry) {
+    final (bgColor, textColor) = switch (entry.status) {
+      'posted' => (AppColors.successLight, AppColors.success),
+      'failed' => (AppColors.errorLight, AppColors.error),
+      'draft' => (AppColors.warningLight, AppColors.warning),
+      'cancelled' => (AppColors.divider, AppColors.textTertiary),
+      _ => (AppColors.infoLight, AppColors.info),
+    };
+
+    return AppCard(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Wrap(
+                spacing: 4,
+                children: entry.platforms
+                    .map((p) => Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(color: _platformColors[p] ?? AppColors.textTertiary, shape: BoxShape.circle),
+                        ))
+                    .toList(),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(_formatDate(entry.scheduledFor), style: GoogleFonts.inter(fontSize: 11, color: AppColors.textTertiary)),
+              ),
+              if (entry.aiGenerated)
+                const Padding(padding: EdgeInsets.only(right: 6), child: Icon(Icons.auto_awesome_rounded, size: 13, color: AppColors.accent)),
+              StatusBadge(label: entry.status[0].toUpperCase() + entry.status.substring(1), bgColor: bgColor, textColor: textColor),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            entry.content.isEmpty ? '(no text — media only)' : entry.content,
+            style: GoogleFonts.inter(fontSize: 13, color: AppColors.textPrimary),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (entry.results.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            ...entry.results.map((r) => Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: Text('${r.platform}: ${r.message}', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textTertiary)),
+                )),
+          ],
+          if (entry.status == 'draft' || entry.status == 'scheduled' || entry.status == 'failed') ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                if (entry.status == 'draft')
+                  Expanded(
+                    child: OutlinedAccentButton(
+                      label: 'Approve',
+                      icon: Icons.check_rounded,
+                      onPressed: () => context.read<CalendarProvider>().approve(entry.id),
+                    ),
+                  ),
+                if (entry.status == 'draft') const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedAccentButton(
+                    label: 'Publish Now',
+                    icon: Icons.send_rounded,
+                    onPressed: () => context.read<CalendarProvider>().publishNow(entry.id),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedAccentButton(
+                    label: 'Cancel',
+                    icon: Icons.close_rounded,
+                    color: AppColors.error,
+                    onPressed: () => context.read<CalendarProvider>().cancel(entry.id),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(DateTime d) => '${d.month}/${d.day} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 }

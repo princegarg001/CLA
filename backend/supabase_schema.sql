@@ -203,6 +203,175 @@ create table if not exists social_posts (
 create index if not exists idx_social_posts_batch on social_posts (batch_id);
 
 -- ---------------------------------------------------------------------------
+-- content_calendar — the unified Social Command Center calendar. One row per
+-- scheduled piece of content, possibly fanning out to multiple platforms;
+-- per-platform outcomes land in `results` after the scheduler runs it.
+-- ---------------------------------------------------------------------------
+create table if not exists content_calendar (
+  id uuid primary key default uuid_generate_v4(),
+  content text not null default '',
+  media_urls text[] default '{}',
+  platforms text[] not null default '{}', -- twitter | instagram | reddit | linkedin
+  post_type text not null default 'post', -- post | thread | reel | story | carousel | comment
+  scheduled_for timestamptz not null,
+  timezone text default 'America/New_York',
+  status text not null default 'scheduled', -- scheduled | posted | failed | cancelled
+  ai_generated boolean not null default false,
+  results jsonb not null default '[]'::jsonb,
+  engagement jsonb not null default '{}'::jsonb,
+  raw jsonb not null default '{}'::jsonb, -- platform-specific extras (e.g. reddit subreddit/title)
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_content_calendar_scheduled on content_calendar (scheduled_for);
+create index if not exists idx_content_calendar_status on content_calendar (status);
+
+-- ---------------------------------------------------------------------------
+-- upwork_jobs — job posts monitored via a third-party watcher (Vollna),
+-- forwarded email, or manual paste. Upwork has no public job-feed API and
+-- bans automated applying, so this exists to make a human the fastest
+-- possible applier: AI scores fit and pre-drafts the proposal the moment a
+-- job lands, everything else is a one-tap review-and-copy.
+-- ---------------------------------------------------------------------------
+create table if not exists upwork_jobs (
+  id uuid primary key default uuid_generate_v4(),
+  title text not null,
+  description text,
+  client_name text,
+  budget_min numeric,
+  budget_max numeric,
+  budget_type text, -- fixed | hourly
+  skills text[] default '{}',
+  country text,
+  client_history jsonb default '{}'::jsonb, -- jobs posted, hire rate, total spent
+  upwork_url text,
+  ai_score numeric default 1 check (ai_score >= 1 and ai_score <= 10),
+  ai_score_reason text,
+  ai_proposal text,
+  status text not null default 'new', -- new | applied | interviewing | hired | rejected | expired
+  applied_at timestamptz,
+  proposal_text text, -- what was actually submitted, once applied
+  outcome_value numeric,
+  source text not null default 'manual', -- vollna | email | manual
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_upwork_jobs_score on upwork_jobs (ai_score desc);
+create index if not exists idx_upwork_jobs_status on upwork_jobs (status);
+create index if not exists idx_upwork_jobs_created on upwork_jobs (created_at desc);
+
+-- ---------------------------------------------------------------------------
+-- clients — a lead that converted to closed_won. Locked by definition: once
+-- created, the source lead is excluded from Apollo/War Room/Radar re-surfacing.
+-- ---------------------------------------------------------------------------
+create table if not exists clients (
+  id uuid primary key default uuid_generate_v4(),
+  lead_id uuid references leads(id) on delete set null,
+  name text not null,
+  company text,
+  email text,
+  phone text,
+  timezone text,
+  region text, -- US | UK | EU
+  preferred_channel text, -- email | whatsapp | slack | twitter_dm
+  avatar_url text,
+  status text not null default 'active', -- active | paused | completed | churned
+  health_score int not null default 8 check (health_score >= 1 and health_score <= 10),
+  health_reason text,
+  total_revenue numeric not null default 0,
+  total_projects int not null default 0,
+  notes text,
+  tags text[] default '{}',
+  locked boolean not null default true, -- always true — prevents re-prospecting
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_clients_status on clients (status);
+create index if not exists idx_clients_health on clients (health_score);
+create index if not exists idx_clients_lead on clients (lead_id);
+
+-- ---------------------------------------------------------------------------
+-- projects — individual pieces of work for a client.
+-- ---------------------------------------------------------------------------
+create table if not exists projects (
+  id uuid primary key default uuid_generate_v4(),
+  client_id uuid not null references clients(id) on delete cascade,
+  title text not null,
+  description text,
+  status text not null default 'scoping', -- scoping | active | review | completed | cancelled
+  budget numeric,
+  currency text not null default 'USD',
+  payment_type text not null default 'fixed', -- fixed | hourly | retainer
+  hourly_rate numeric,
+  hours_logged numeric not null default 0,
+  timer_started_at timestamptz, -- non-null while a time-tracking timer is running
+  start_date date,
+  due_date date,
+  completed_date date,
+  source text, -- upwork | contra | solidgigs | apollo | direct
+  contract_url text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_projects_client on projects (client_id);
+create index if not exists idx_projects_status on projects (status);
+
+-- ---------------------------------------------------------------------------
+-- milestones — project deliverables with payment tracking.
+-- ---------------------------------------------------------------------------
+create table if not exists milestones (
+  id uuid primary key default uuid_generate_v4(),
+  project_id uuid not null references projects(id) on delete cascade,
+  title text not null,
+  description text,
+  amount numeric,
+  status text not null default 'pending', -- pending | in_progress | delivered | approved | paid
+  due_date date,
+  delivered_at timestamptz,
+  paid_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_milestones_project on milestones (project_id);
+create index if not exists idx_milestones_due on milestones (due_date);
+
+-- ---------------------------------------------------------------------------
+-- invoices — payment tracking, optionally tied to one milestone.
+-- ---------------------------------------------------------------------------
+create table if not exists invoices (
+  id uuid primary key default uuid_generate_v4(),
+  client_id uuid not null references clients(id) on delete cascade,
+  project_id uuid references projects(id) on delete set null,
+  milestone_id uuid references milestones(id) on delete set null,
+  amount numeric not null,
+  currency text not null default 'USD',
+  status text not null default 'pending', -- pending | sent | paid | overdue
+  due_date date,
+  paid_at timestamptz,
+  invoice_url text,
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_invoices_client on invoices (client_id);
+create index if not exists idx_invoices_status on invoices (status);
+
+-- ---------------------------------------------------------------------------
+-- communication_log — every interaction with a client across every channel.
+-- ---------------------------------------------------------------------------
+create table if not exists communication_log (
+  id uuid primary key default uuid_generate_v4(),
+  client_id uuid not null references clients(id) on delete cascade,
+  channel text not null, -- email | whatsapp | call | slack | twitter_dm | meeting
+  direction text not null default 'outbound', -- outbound | inbound
+  summary text not null,
+  full_content text,
+  sentiment text, -- positive | neutral | negative
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_comm_log_client on communication_log (client_id, created_at desc);
+
+-- ---------------------------------------------------------------------------
 -- Row Level Security
 -- This is a single-tenant founder tool. RLS is enabled with a service-role-only
 -- policy, so the backend MUST connect using the "service_role" key (Project
@@ -222,12 +391,19 @@ alter table scheduled_posts enable row level security;
 alter table agent_runs enable row level security;
 alter table oauth_connections enable row level security;
 alter table social_posts enable row level security;
+alter table content_calendar enable row level security;
+alter table upwork_jobs enable row level security;
+alter table clients enable row level security;
+alter table projects enable row level security;
+alter table milestones enable row level security;
+alter table invoices enable row level security;
+alter table communication_log enable row level security;
 
 do $$
 declare
   t text;
 begin
-  for t in select unnest(array['leads','deals','sequences','messages','templates','settings','icp_profiles','scheduled_posts','agent_runs','oauth_connections','social_posts'])
+  for t in select unnest(array['leads','deals','sequences','messages','templates','settings','icp_profiles','scheduled_posts','agent_runs','oauth_connections','social_posts','content_calendar','upwork_jobs','clients','projects','milestones','invoices','communication_log'])
   loop
     execute format('drop policy if exists "service_role_all" on %I;', t);
     execute format(

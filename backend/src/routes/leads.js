@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const aiService = require('../services/aiService');
+const leadPipelineService = require('../services/leadPipelineService');
 const { asyncHandler, ok, fail, clampScore } = require('../utils/helpers');
 
 // GET /api/leads?status=&source=&minScore=
@@ -36,6 +37,9 @@ router.post('/', asyncHandler(async (req, res) => {
   const body = req.body || {};
   const { score } = await aiService.scoreLead(body).catch(() => ({ score: aiService.heuristicScore(body) }));
   const lead = await db.insert('leads', { status: 'new', ...body, score: clampScore(score) });
+  // Fire-and-forget: score 8+ gets a brief + outreach draft prepared in the
+  // background (Workflow 4) without holding up the response for two AI calls.
+  leadPipelineService.onLeadCreated(lead).catch(() => {});
   ok(res, lead);
 }));
 

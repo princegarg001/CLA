@@ -8,13 +8,16 @@ const { asyncHandler, ok, fail } = require('../utils/helpers');
 
 // SolidGigs and Contra have no public API — jobs arrive via forwarded-email webhook
 // (see routes/webhooks.js) and are stored as leads with source='solidgigs'|'contra'.
+// Locked leads have already converted to a client (see routes/clients.js
+// convert/:leadId) — filtered out here so a won job doesn't keep showing up
+// as something to pitch.
 router.get('/solidgigs', asyncHandler(async (req, res) => {
-  const jobs = await db.list('leads', { filters: { source: 'solidgigs' }, orderBy: { column: 'created_at', ascending: false } });
+  const jobs = (await db.list('leads', { filters: { source: 'solidgigs' }, orderBy: { column: 'created_at', ascending: false } })).filter((l) => !l.locked);
   ok(res, jobs.length ? jobs : SAMPLE_SOLIDGIGS);
 }));
 
 router.get('/contra', asyncHandler(async (req, res) => {
-  const jobs = await db.list('leads', { filters: { source: 'contra' }, orderBy: { column: 'created_at', ascending: false } });
+  const jobs = (await db.list('leads', { filters: { source: 'contra' }, orderBy: { column: 'created_at', ascending: false } })).filter((l) => !l.locked);
   ok(res, jobs.length ? jobs : SAMPLE_CONTRA);
 }));
 

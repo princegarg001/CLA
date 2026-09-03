@@ -57,13 +57,22 @@ router.get('/missions', asyncHandler(async (req, res) => {
   ok(res, missions);
 }));
 
-// GET /api/warroom/feed — aggregated live alerts (new leads, replies, traffic spikes, errors)
+// GET /api/warroom/feed — aggregated live alerts (new leads, replies, traffic spikes, errors, client health)
 router.get('/feed', asyncHandler(async (req, res) => {
-  const [leads, health, active] = await Promise.all([
+  const [leads, health, active, clients, milestones, invoices] = await Promise.all([
     db.list('leads', { orderBy: { column: 'created_at', ascending: false }, limit: 20 }),
     sentryService.getIssues(),
     umamiService.getActiveVisitors(),
+    db.list('clients', { filters: { status: 'active' } }),
+    db.list('milestones'),
+    db.list('invoices'),
   ]);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const weekOut = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+  const dueSoonMilestones = milestones.filter((m) => m.status !== 'paid' && m.due_date && m.due_date >= today && m.due_date <= weekOut);
+  const overdueInvoices = invoices.filter((i) => i.status !== 'paid' && i.due_date && i.due_date < today);
+  const atRiskClients = clients.filter((c) => (c.health_score || 8) < 6);
 
   const feed = [
     ...leads.slice(0, 10).map((l) => ({
@@ -77,6 +86,21 @@ router.get('/feed', asyncHandler(async (req, res) => {
     ...(active.visitors >= 20
       ? [{ type: 'traffic', text: `Traffic spike: ${active.visitors} live visitors right now`, timestamp: new Date().toISOString() }]
       : []),
+    ...atRiskClients.map((c) => ({
+      type: 'client_health',
+      text: `${c.name} health dropped to ${c.health_score}/10${c.health_reason ? ` — ${c.health_reason}` : ''}`,
+      timestamp: c.updated_at || new Date().toISOString(),
+    })),
+    ...dueSoonMilestones.map((m) => ({
+      type: 'milestone_due',
+      text: `Milestone "${m.title}" due ${m.due_date}`,
+      timestamp: new Date().toISOString(),
+    })),
+    ...overdueInvoices.map((i) => ({
+      type: 'invoice_overdue',
+      text: `Invoice for $${i.amount} is overdue (was due ${i.due_date})`,
+      timestamp: new Date().toISOString(),
+    })),
   ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
   ok(res, feed);

@@ -2,6 +2,12 @@ require('dotenv').config();
 
 const bool = (v) => v === 'true' || v === '1';
 
+// Comma-separated env var -> trimmed array, falling back to a default list.
+const csv = (v, fallback = []) => {
+  const parts = (v || '').split(',').map((s) => s.trim()).filter(Boolean);
+  return parts.length ? parts : fallback;
+};
+
 const config = {
   port: process.env.PORT || 8080,
   baseUrl: process.env.BASE_URL || `http://localhost:${process.env.PORT || 8080}`,
@@ -26,6 +32,11 @@ const config = {
 
   apolloApiKey: process.env.APOLLO_API_KEY || '',
   apolloBaseUrl: process.env.APOLLO_BASE_URL || 'https://api.apollo.io/api/v1',
+  // Used by the 48h Gumroad auto-follow-up step (leadPipelineService) — which
+  // Apollo sequence a stale high-score Gumroad lead gets queued into. Leave
+  // blank to skip the live Apollo call (the lead still gets marked contacted
+  // and keeps its AI-drafted outreach message for manual sending).
+  apolloDefaultSequenceId: process.env.APOLLO_DEFAULT_SEQUENCE_ID || '',
 
   umamiToken: process.env.UMAMI_TOKEN || '',
   umamiSiteId: process.env.UMAMI_SITE_ID || '',
@@ -81,6 +92,33 @@ const config = {
   metaAppId: process.env.META_APP_ID || '',
   metaAppSecret: process.env.META_APP_SECRET || '',
   metaRedirectUri: process.env.META_REDIRECT_URI || '',
+
+  // ---- Reddit (free: OAuth2 "script" app, 100 requests/minute) --------------
+  redditClientId: process.env.REDDIT_CLIENT_ID || '',
+  redditClientSecret: process.env.REDDIT_CLIENT_SECRET || '',
+  redditUsername: process.env.REDDIT_USERNAME || '',
+  redditPassword: process.env.REDDIT_PASSWORD || '',
+  redditUserAgent: process.env.REDDIT_USER_AGENT || 'CLA:v2:1.0 (by /u/alphotech)',
+  redditMonitoredSubs: csv(process.env.REDDIT_MONITORED_SUBS, [
+    'SaaS', 'startups', 'webdev', 'node', 'django',
+    'freelance', 'forhire', 'fintech', 'devops', 'microservices',
+  ]),
+  redditKeywords: csv(process.env.REDDIT_KEYWORDS, [
+    'backend', 'api', 'microservices', 'automation',
+    'python', 'node', 'devops', 'fintech',
+  ]),
+
+  // Timezone a content-calendar entry falls back to when the client doesn't
+  // send one, so "9am" in the UI means the same instant on the server.
+  defaultTimezone: process.env.DEFAULT_TIMEZONE || 'America/New_York',
+
+  // ---- Upwork monitoring (no official API for job feeds — jobs arrive via a
+  // third-party watcher like Vollna, or an email forward, or manual paste) ---
+  upworkWebhookSecret: process.env.UPWORK_WEBHOOK_SECRET || '',
+  upworkSkills: csv(process.env.UPWORK_SKILLS, [
+    'Python', 'Node.js', 'Backend', 'DevOps', 'Microservices', 'API', 'Automation',
+  ]),
+  upworkMinBudget: parseInt(process.env.UPWORK_MIN_BUDGET || '500', 10),
 };
 
 // isConfigured('apollo') -> true if APOLLO_API_KEY is set, etc.
@@ -112,14 +150,34 @@ const CHECKS = {
   // GET /api/social/status, since that requires a DB read this sync check can't do.
   linkedin: () => !!(config.linkedinClientId && config.linkedinClientSecret),
   instagram: () => !!(config.metaAppId && config.metaAppSecret),
+  // Reddit uses a "script" app tied to your own account — there's no browser
+  // OAuth step, so having the four credentials IS being connected.
+  reddit: () =>
+    !!(config.redditClientId && config.redditClientSecret && config.redditUsername && config.redditPassword),
+  // Posting to X needs OAuth 1.0a user context; the app-only bearer can read
+  // but never write. Tracked separately from `twitter` so the UI can say
+  // "reads work, posting won't" instead of only finding out at publish time.
+  twitterWrite: () =>
+    !!(config.twitterApiKey && config.twitterApiSecret && config.twitterAccessToken && config.twitterAccessSecret),
+  // Upwork has no auth of its own to configure — "connected" just means a
+  // webhook secret is set, so an inbound feed can be verified rather than
+  // accepted from anyone who finds the URL.
+  upwork: () => !!config.upworkWebhookSecret,
 };
 
 config.isConfigured = (name) => (CHECKS[name] ? CHECKS[name]() : false);
 
+// twitterWrite is a capability flag under the "twitter" integration, not a
+// separate one — kept out of the Settings screen's integration grid so it
+// doesn't get counted/listed as its own platform.
+const GRID_EXCLUDED = new Set(['twitterWrite']);
+
 config.integrationStatus = () =>
-  Object.keys(CHECKS).reduce((acc, key) => {
-    acc[key] = CHECKS[key]();
-    return acc;
-  }, {});
+  Object.keys(CHECKS)
+    .filter((key) => !GRID_EXCLUDED.has(key))
+    .reduce((acc, key) => {
+      acc[key] = CHECKS[key]();
+      return acc;
+    }, {});
 
 module.exports = config;

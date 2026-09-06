@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../core/notifications/push_service.dart';
 import '../../core/theme/auth_theme.dart';
 import '../../providers/voice_auth_controller.dart';
 import '../../widgets/auth_widgets.dart';
@@ -32,7 +33,14 @@ class _AuthGateState extends State<AuthGate> {
   Widget build(BuildContext context) {
     final auth = context.watch<VoiceAuthController>();
 
-    if (auth.isAuthenticated) return widget.child;
+    if (auth.isAuthenticated) {
+      // Registering the FCM token before the user is authenticated isn't
+      // useful, and the OS permission prompt reads better once they're
+      // actually inside the app. init() is idempotent — safe to call again
+      // on every rebuild while authenticated.
+      WidgetsBinding.instance.addPostFrameCallback((_) => context.read<PushService>().init());
+      return widget.child;
+    }
 
     Widget screen;
     switch (auth.status) {

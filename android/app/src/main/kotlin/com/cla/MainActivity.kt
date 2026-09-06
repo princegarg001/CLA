@@ -1,4 +1,4 @@
-package com.alphotech.cla_v2
+package com.cla
 
 import io.flutter.embedding.android.FlutterActivity
 

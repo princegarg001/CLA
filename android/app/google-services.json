@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "47646761693",
+    "project_id": "cla-v2",
+    "storage_bucket": "cla-v2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:47646761693:android:a4392d1a22f3ad67b27134",
+        "android_client_info": {
+          "package_name": "com.cla"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAU4KO8_Gjgw7RwAKia7SMgnrv8Gl3gcf4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

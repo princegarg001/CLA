@@ -1,6 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Voice command login + in-app voice control (speech_to_text) -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- Push notifications (Firebase Cloud Messaging) — required on Android 13+
+         for the system tray notification shown while the app is backgrounded. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="cla_v2"
         android:name="${applicationName}"

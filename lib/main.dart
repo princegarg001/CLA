@@ -1,9 +1,11 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'core/config/app_config.dart';
 import 'core/network/api_client.dart';
+import 'core/notifications/push_service.dart';
 import 'core/theme/app_colors.dart';
 import 'core/theme/app_theme.dart';
 import 'data/repositories/agents_repository.dart';
@@ -14,6 +16,7 @@ import 'data/repositories/client_repository.dart';
 import 'data/repositories/freelance_repository.dart';
 import 'data/repositories/growth_repository.dart';
 import 'data/repositories/leads_repository.dart';
+import 'data/repositories/notifications_repository.dart';
 import 'data/repositories/outreach_repository.dart';
 import 'data/repositories/reddit_repository.dart';
 import 'data/repositories/revenue_repository.dart';
@@ -49,7 +52,9 @@ import 'screens/analytics_tower/analytics_tower_screen.dart';
 import 'screens/outreach_composer/outreach_composer_screen.dart';
 import 'screens/settings/settings_screen.dart';
 
-void main() {
+final scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
@@ -59,6 +64,13 @@ void main() {
       systemNavigationBarIconBrightness: Brightness.dark,
     ),
   );
+  try {
+    await Firebase.initializeApp();
+  } catch (_) {
+    // No google-services.json yet, no Play Services on this device/emulator,
+    // etc. — push notifications just won't work; nothing else in the app
+    // depends on Firebase, so this must never block startup.
+  }
   runApp(const CLAApp());
 }
 
@@ -92,6 +104,8 @@ class CLAApp extends StatelessWidget {
         Provider(create: (context) => CalendarRepository(context.read<ApiClient>())),
         Provider(create: (context) => UpworkRepository(context.read<ApiClient>())),
         Provider(create: (context) => ClientRepository(context.read<ApiClient>())),
+        Provider(create: (context) => NotificationsRepository(context.read<ApiClient>())),
+        Provider(create: (context) => PushService(context.read<NotificationsRepository>(), scaffoldMessengerKey)),
 
         // Screen providers — hold loading/error/data state for each of the 9 screens.
         ChangeNotifierProvider(create: (context) => LeadsProvider(context.read<LeadsRepository>())),
@@ -117,6 +131,7 @@ class CLAApp extends StatelessWidget {
       child: MaterialApp(
         title: 'AlphoTech CLA v2',
         debugShowCheckedModeBanner: false,
+        scaffoldMessengerKey: scaffoldMessengerKey,
         theme: AppTheme.lightTheme,
         home: const AuthGate(child: MainNavigationShell()),
       ),

@@ -296,26 +296,28 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   }
 
   Widget _buildMoreMenu() {
-    return Positioned(
-      bottom: 0,
-      left: 0,
-      right: 0,
-      child: GestureDetector(
-        onTap: () => setState(() => _showMoreMenu = false),
-        child: Container(
-          color: Colors.black.withValues(alpha: 0.3),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              // Tap outside to dismiss
-              Expanded(
-                child: GestureDetector(
-                  onTap: () => setState(() => _showMoreMenu = false),
-                ),
-              ),
-              // Menu
-              Container(
-                margin: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+    // A Stack, not a Column-inside-one-GestureDetector: the dismiss barrier
+    // and the menu card are siblings, so taps on the card's InkWells never
+    // also land in the barrier's own tap recognizer (nesting a dismiss
+    // GestureDetector *around* tappable children puts both in the same
+    // gesture arena and makes item taps unreliable).
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          // Full-screen barrier — tap anywhere on it to dismiss.
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => setState(() => _showMoreMenu = false),
+              child: Container(color: Colors.black.withValues(alpha: 0.3)),
+            ),
+          ),
+          // Menu card — a separate sibling, so it fully owns its own taps.
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 80,
+            child: Container(
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(20),
@@ -405,11 +407,10 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                   ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
-      ),
-    );
+      );
   }
 }
 

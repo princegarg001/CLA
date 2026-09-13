@@ -108,9 +108,9 @@ class _WarRoomScreenState extends State<WarRoomScreen> {
                     child: const Icon(Icons.grid_view_rounded, color: Colors.white, size: 22),
                   ),
                   const Spacer(),
-                  _headerAction(Icons.search_rounded),
+                  _headerAction(Icons.search_rounded, onTap: () => _openFeedSearch(context)),
                   const SizedBox(width: 10),
-                  _headerAction(Icons.notifications_none_rounded),
+                  _headerAction(Icons.notifications_none_rounded, onTap: () => _openNotifications(context, provider)),
                 ],
               ),
               const SizedBox(height: 20),
@@ -174,11 +174,114 @@ class _WarRoomScreenState extends State<WarRoomScreen> {
     );
   }
 
-  Widget _headerAction(IconData icon) {
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)),
-      child: Icon(icon, color: Colors.white, size: 20),
+  Widget _headerAction(IconData icon, {required VoidCallback onTap}) {
+    return Material(
+      color: Colors.white.withValues(alpha: 0.15),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Icon(icon, color: Colors.white, size: 20),
+        ),
+      ),
+    );
+  }
+
+  void _openNotifications(BuildContext context, WarRoomProvider provider) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.6,
+          minChildSize: 0.3,
+          maxChildSize: 0.9,
+          expand: false,
+          builder: (context, scrollController) => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Text('Notifications', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              ),
+              const Divider(height: 1, color: AppColors.divider),
+              Expanded(
+                child: provider.feed.isEmpty
+                    ? Center(
+                        child: Text('No notifications yet.', style: GoogleFonts.inter(fontSize: 13, color: AppColors.textSecondary)),
+                      )
+                    : ListView(
+                        controller: scrollController,
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                        children: provider.feed.map((a) => Padding(padding: const EdgeInsets.only(bottom: 10), child: _feedItem(a))).toList(),
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _openFeedSearch(BuildContext context) {
+    final feed = context.read<WarRoomProvider>().feed;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        var query = '';
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final results = query.isEmpty
+                ? feed
+                : feed.where((a) => a.text.toLowerCase().contains(query.toLowerCase())).toList();
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+              child: SizedBox(
+                height: MediaQuery.of(context).size.height * 0.7,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                      child: TextField(
+                        autofocus: true,
+                        onChanged: (v) => setSheetState(() => query = v),
+                        decoration: InputDecoration(
+                          hintText: 'Search leads, alerts, activity…',
+                          prefixIcon: const Icon(Icons.search_rounded),
+                          filled: true,
+                          fillColor: AppColors.surfaceBg,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: results.isEmpty
+                          ? Center(
+                              child: Text(
+                                query.isEmpty ? 'Start typing to search the live feed.' : 'No matches for "$query".',
+                                style: GoogleFonts.inter(fontSize: 13, color: AppColors.textSecondary),
+                              ),
+                            )
+                          : ListView(
+                              padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                              children: results.map((a) => Padding(padding: const EdgeInsets.only(bottom: 10), child: _feedItem(a))).toList(),
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -327,10 +430,17 @@ class _WarRoomScreenState extends State<WarRoomScreen> {
             ),
           );
         }),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: AccentButton(label: 'Enter Focus Mode', onPressed: () {}, icon: Icons.bolt_rounded),
-        ),
+        if (provider.missions.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: AccentButton(
+              label: 'Enter Focus Mode',
+              icon: Icons.bolt_rounded,
+              onPressed: () => Navigator.of(context, rootNavigator: true).push(
+                MaterialPageRoute(builder: (_) => _FocusModeScreen(missions: provider.missions)),
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -345,35 +455,40 @@ class _WarRoomScreenState extends State<WarRoomScreen> {
             padding: EdgeInsets.symmetric(horizontal: 16),
             child: Text('No activity yet.'),
           ),
-        ...provider.feed.map((a) {
-          final visual = _feedVisual(a.type);
-          return AppCard(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
+        ...provider.feed.map(_feedItem),
+      ],
+    );
+  }
+
+  /// One row of the live feed — shared by the inline section above and the
+  /// "Notifications" bottom sheet opened from the header bell, so both stay
+  /// in sync with the exact same data instead of diverging.
+  Widget _feedItem(FeedAlert a) {
+    final visual = _feedVisual(a.type);
+    return AppCard(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(color: visual.$2.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
+            child: Icon(visual.$1, color: visual.$2, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(color: visual.$2.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
-                  child: Icon(visual.$1, color: visual.$2, size: 18),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(a.text, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
-                      const SizedBox(height: 2),
-                      Text(_relativeTime(a.timestamp), style: GoogleFonts.inter(fontSize: 11, color: AppColors.textTertiary)),
-                    ],
-                  ),
-                ),
-                Container(width: 8, height: 8, decoration: BoxDecoration(color: visual.$2, shape: BoxShape.circle)),
+                Text(a.text, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
+                const SizedBox(height: 2),
+                Text(_relativeTime(a.timestamp), style: GoogleFonts.inter(fontSize: 11, color: AppColors.textTertiary)),
               ],
             ),
-          );
-        }),
-      ],
+          ),
+          Container(width: 8, height: 8, decoration: BoxDecoration(color: visual.$2, shape: BoxShape.circle)),
+        ],
+      ),
     );
   }
 
@@ -395,5 +510,87 @@ class _WarRoomScreenState extends State<WarRoomScreen> {
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
+  }
+}
+
+/// Full-screen, distraction-free view of today's missions, one at a time.
+/// "Done" here is local to this session only (missions aren't backed by a
+/// completable row on the server) — the point is forcing single-task focus,
+/// not persisting a checklist.
+class _FocusModeScreen extends StatefulWidget {
+  final List<Mission> missions;
+  const _FocusModeScreen({required this.missions});
+
+  @override
+  State<_FocusModeScreen> createState() => _FocusModeScreenState();
+}
+
+class _FocusModeScreenState extends State<_FocusModeScreen> {
+  int _index = 0;
+  final Set<int> _done = {};
+
+  @override
+  Widget build(BuildContext context) {
+    final missions = widget.missions;
+    final allDone = _done.length >= missions.length;
+    final current = allDone ? null : missions[_index];
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0B1220),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Focus Mode', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white.withValues(alpha: 0.6))),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded, color: Colors.white),
+                  ),
+                ],
+              ),
+              const Spacer(),
+              if (allDone) ...[
+                const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 56),
+                const SizedBox(height: 16),
+                Text('All missions cleared', style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w700, color: Colors.white)),
+                const SizedBox(height: 8),
+                Text('Pull to refresh in War Room for tomorrow\'s list.',
+                    style: GoogleFonts.inter(fontSize: 13, color: Colors.white.withValues(alpha: 0.6))),
+              ] else ...[
+                Text('${_done.length + 1} of ${missions.length}', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.accentLight)),
+                const SizedBox(height: 12),
+                Text(current!.text, style: GoogleFonts.inter(fontSize: 26, fontWeight: FontWeight.w700, color: Colors.white, height: 1.3)),
+              ],
+              const Spacer(),
+              if (!allDone)
+                SizedBox(
+                  width: double.infinity,
+                  child: AccentButton(
+                    label: 'Mark Done & Next',
+                    icon: Icons.check_rounded,
+                    onPressed: () {
+                      setState(() {
+                        _done.add(_index);
+                        final next = _index + 1;
+                        if (next < missions.length && !_done.contains(next)) _index = next;
+                      });
+                    },
+                  ),
+                )
+              else
+                SizedBox(
+                  width: double.infinity,
+                  child: AccentButton(label: 'Exit Focus Mode', icon: Icons.logout_rounded, onPressed: () => Navigator.of(context).pop()),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

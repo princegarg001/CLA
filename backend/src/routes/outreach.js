@@ -22,7 +22,7 @@ router.post('/generate', asyncHandler(async (req, res) => {
 
   const body = await aiService.generateOutreachMessage({ lead, tone, market, channel });
   const draft = await db.insert('messages', {
-    leadId, channel, tone, market, body, direction: 'outbound', aiGenerated: true, status: 'draft',
+    lead_id: leadId, channel, tone, market, body, direction: 'outbound', ai_generated: true, status: 'draft',
   });
   ok(res, draft);
 }));
@@ -38,12 +38,11 @@ router.patch('/messages/:id', asyncHandler(async (req, res) => {
   if (!existing) return fail(res, 404, 'Message not found');
 
   const patch = { ...req.body };
-  if (patch.status === 'sent' && existing.channel === 'twitter_dm') {
+  if (patch.status === 'sent') {
     // Twitter DMs require Basic tier+; postTweet path only applies to public tweets, not DMs —
-    // sending logic for DMs is a placeholder until Basic tier credentials are wired in.
-    patch.sentAt = new Date().toISOString();
-  } else if (patch.status === 'sent') {
-    patch.sentAt = new Date().toISOString();
+    // sending logic for DMs is a placeholder until Basic tier credentials are wired in. Both
+    // branches just stamp sent_at either way, so they've been collapsed into one.
+    patch.sent_at = new Date().toISOString();
   }
   const updated = await db.update('messages', req.params.id, patch);
   ok(res, updated);

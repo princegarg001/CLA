@@ -412,6 +412,19 @@ create table if not exists device_tokens (
 -- forward reference resolves. Also safe to re-run on a DB that already has
 -- both tables from an earlier version of this file.
 alter table leads add column if not exists referred_by uuid references clients(id);
+
+-- The web app's real login (POST /api/auth/setup, /login) — replaces a
+-- baked-into-the-JS-bundle API key with a proper username/password gate,
+-- since the app is now deployed at a public URL. One row per person with
+-- access; password_hash is bcrypt, never the plaintext.
+create table if not exists app_users (
+  id uuid primary key default uuid_generate_v4(),
+  name text not null,
+  username text not null unique,
+  password_hash text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
 -- Running credit owed for referrals a client has sent — a single balance,
 -- not a full transaction ledger (nothing here processes payouts).
 alter table clients add column if not exists referral_credit_owed numeric not null default 0;
@@ -449,12 +462,13 @@ alter table invoices enable row level security;
 alter table communication_log enable row level security;
 alter table testimonials enable row level security;
 alter table device_tokens enable row level security;
+alter table app_users enable row level security;
 
 do $$
 declare
   t text;
 begin
-  for t in select unnest(array['leads','deals','sequences','messages','templates','settings','icp_profiles','scheduled_posts','agent_runs','oauth_connections','social_posts','content_calendar','upwork_jobs','clients','projects','milestones','invoices','communication_log','testimonials','device_tokens'])
+  for t in select unnest(array['leads','deals','sequences','messages','templates','settings','icp_profiles','scheduled_posts','agent_runs','oauth_connections','social_posts','content_calendar','upwork_jobs','clients','projects','milestones','invoices','communication_log','testimonials','device_tokens','app_users'])
   loop
     execute format('drop policy if exists "service_role_all" on %I;', t);
     execute format(

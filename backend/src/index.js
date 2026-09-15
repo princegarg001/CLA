@@ -27,6 +27,12 @@ app.use('/api/webhooks', apiLimiter, require('./routes/webhooks'));
 // directly) — same reasoning as webhooks, must stay reachable unauthenticated.
 app.use('/api/oauth', apiLimiter, require('./routes/oauthCallbacks'));
 
+// Login/setup must be reachable without the X-API-Key — they're what hand it
+// out in the first place. Real brute-force protection lives in the route
+// itself (bcrypt + a dummy-hash compare on unknown usernames); apiLimiter
+// here just caps raw request volume.
+app.use('/api/auth', apiLimiter, require('./routes/auth'));
+
 // Everything else requires X-API-Key when CLA_API_KEY is set.
 const api = express.Router();
 api.use(apiKeyAuth, apiLimiter);

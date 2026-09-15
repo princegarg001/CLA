@@ -13,8 +13,9 @@ import {
   Settings as SettingsIcon,
   Menu,
   X,
+  LogOut,
 } from 'lucide-react';
-import { useVoiceAuth } from '../auth/VoiceAuthContext';
+import { useAuth } from '../auth/AuthContext';
 
 const NAV = [
   { to: '/', label: 'War Room', icon: Radio, end: true },
@@ -30,7 +31,7 @@ const NAV = [
 
 export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { lock } = useVoiceAuth();
+  const { name, logout } = useAuth();
 
   const navItems = (
     <>
@@ -75,12 +76,12 @@ export function AppShell() {
           <span className="font-bold tracking-tight">AlphoTech</span>
         </div>
         <nav className="flex-1 flex flex-col gap-1">{navItems}</nav>
-        <button
-          onClick={lock}
-          className="mt-4 text-xs text-text-faint hover:text-text-muted text-left px-3"
-        >
-          Lock app
-        </button>
+        <div className="mt-4 px-3 pt-3 border-t border-border-soft">
+          {name && <p className="text-xs text-text-muted mb-2 truncate">Logged in as {name}</p>}
+          <button onClick={logout} className="flex items-center gap-1.5 text-xs text-text-faint hover:text-critical transition-colors">
+            <LogOut size={13} /> Log out
+          </button>
+        </div>
       </aside>
 
       {/* Mobile top bar */}
@@ -106,7 +107,13 @@ export function AppShell() {
                 <X size={20} />
               </button>
             </div>
-            <nav className="flex flex-col gap-1">{navItems}</nav>
+            <nav className="flex-1 flex flex-col gap-1">{navItems}</nav>
+            <div className="mt-4 px-3 pt-3 border-t border-border-soft">
+              {name && <p className="text-xs text-text-muted mb-2 truncate">Logged in as {name}</p>}
+              <button onClick={logout} className="flex items-center gap-1.5 text-xs text-text-faint hover:text-critical transition-colors">
+                <LogOut size={13} /> Log out
+              </button>
+            </div>
           </div>
         </div>
       )}

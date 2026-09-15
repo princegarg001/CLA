@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from 'react';
-import { useVoiceAuth } from './VoiceAuthContext';
-import { VoiceOrb } from './VoiceOrb';
+import { useState, type FormEvent, type ReactNode } from 'react';
+import { UserRound, Lock, ShieldCheck } from 'lucide-react';
+import { useAuth, authErrorMessage } from './AuthContext';
 
 function Shell({ children }: { children: ReactNode }) {
   return (
@@ -10,43 +10,96 @@ function Shell({ children }: { children: ReactNode }) {
   );
 }
 
+function Field({
+  label,
+  type = 'text',
+  value,
+  onChange,
+  autoFocus,
+  placeholder,
+}: {
+  label: string;
+  type?: string;
+  value: string;
+  onChange: (v: string) => void;
+  autoFocus?: boolean;
+  placeholder?: string;
+}) {
+  return (
+    <div>
+      <label className="text-xs font-semibold text-text-muted block mb-1.5">{label}</label>
+      <input
+        type={type}
+        value={value}
+        autoFocus={autoFocus}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-xl bg-surface border border-border px-4 py-3 text-sm outline-none focus:border-amber transition-colors"
+      />
+    </div>
+  );
+}
+
+function Logo() {
+  return (
+    <div className="flex flex-col items-center mb-8">
+      <div className="h-14 w-14 rounded-2xl bg-amber flex items-center justify-center text-[#221604] font-bold text-2xl mb-4">A</div>
+      <h1 className="text-2xl font-bold">AlphoTech</h1>
+    </div>
+  );
+}
+
 function SetupScreen() {
-  const { setPassphrase, statusMessage } = useVoiceAuth();
-  const [phrase, setPhrase] = useState('');
+  const { setup } = useAuth();
+  const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!name.trim() || !username.trim() || !password) {
+      setError('Fill in every field.');
+      return;
+    }
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+    if (password !== confirm) {
+      setError("Passwords don't match.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await setup(name.trim(), username.trim(), password);
+    } catch (err) {
+      setError(authErrorMessage(err));
+      setLoading(false);
+    }
+  }
 
   return (
     <Shell>
-      <div className="text-center mb-8">
-        <VoiceOrb status="needsSetup" soundLevel={0} />
-      </div>
-      <h1 className="text-2xl font-bold text-center mb-2">Set your passphrase</h1>
+      <Logo />
       <p className="text-sm text-text-muted text-center mb-6">
-        Pick a short phrase — two or more words — you'll say (or type) it to unlock AlphoTech every time.
+        First time here — set up the one account that controls AlphoTech. You'll use this to log in every time from now on, on any device.
       </p>
-      <p className="text-xs text-text-faint text-center mb-6">
-        This checks <em>what</em> you say, not who's saying it — a convenience lock, not identity verification. Don't
-        reuse a real password here.
-      </p>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          setPassphrase(phrase);
-        }}
-        className="space-y-3"
-      >
-        <input
-          autoFocus
-          value={phrase}
-          onChange={(e) => setPhrase(e.target.value)}
-          placeholder="e.g. amber falcon rising"
-          className="w-full rounded-xl bg-surface border border-border px-4 py-3 text-sm outline-none focus:border-amber transition-colors"
-        />
-        {statusMessage && <p className="text-xs text-critical">{statusMessage}</p>}
+      <form onSubmit={handleSubmit} className="space-y-3.5">
+        <Field label="Your name" value={name} onChange={setName} autoFocus placeholder="Prince" />
+        <Field label="Username" value={username} onChange={setUsername} placeholder="prince" />
+        <Field label="Password" type="password" value={password} onChange={setPassword} placeholder="At least 8 characters" />
+        <Field label="Confirm password" type="password" value={confirm} onChange={setConfirm} />
+        {error && <p className="text-xs text-critical">{error}</p>}
         <button
           type="submit"
-          className="w-full rounded-xl bg-amber text-[#221604] font-semibold py-3 text-sm hover:bg-amber-light transition-colors"
+          disabled={loading}
+          className="w-full rounded-xl bg-amber text-[#221604] font-semibold py-3 text-sm hover:bg-amber-light transition-colors disabled:opacity-50"
         >
-          Save passphrase
+          {loading ? 'Creating account…' : 'Create account'}
         </button>
       </form>
     </Shell>
@@ -54,73 +107,63 @@ function SetupScreen() {
 }
 
 function LoginScreen() {
-  const { status, transcript, statusMessage, soundLevel, beginListening, submitTypedPhrase, backToLocked, micAvailable, resetPassphrase } =
-    useVoiceAuth();
-  const [typed, setTyped] = useState('');
+  const { login } = useAuth();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!username.trim() || !password) {
+      setError('Enter your username and password.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await login(username.trim(), password);
+    } catch (err) {
+      setError(authErrorMessage(err));
+      setLoading(false);
+    }
+  }
 
   return (
     <Shell>
-      <div className="text-center mb-8">
-        <VoiceOrb status={status} soundLevel={soundLevel} />
-      </div>
-      <h1 className="text-2xl font-bold text-center mb-2">AlphoTech</h1>
-      <p className="text-sm text-text-muted text-center mb-8 min-h-5">
-        {statusMessage || 'Say your passphrase to unlock.'}
-      </p>
-
-      {transcript && status === 'listening' && (
-        <p className="text-center text-sm text-text-faint italic mb-4">"{transcript}"</p>
-      )}
-
-      {micAvailable && status !== 'listening' && (
+      <Logo />
+      <form onSubmit={handleSubmit} className="space-y-3.5">
+        <div className="relative">
+          <UserRound size={15} className="absolute left-4 top-[38px] text-text-faint" />
+          <Field label="Username" value={username} onChange={setUsername} autoFocus />
+        </div>
+        <div className="relative">
+          <Lock size={15} className="absolute left-4 top-[38px] text-text-faint" />
+          <Field label="Password" type="password" value={password} onChange={setPassword} />
+        </div>
+        {error && <p className="text-xs text-critical">{error}</p>}
         <button
-          onClick={beginListening}
-          className="w-full rounded-xl bg-amber text-[#221604] font-semibold py-3 text-sm hover:bg-amber-light transition-colors mb-3"
+          type="submit"
+          disabled={loading}
+          className="w-full rounded-xl bg-amber text-[#221604] font-semibold py-3 text-sm hover:bg-amber-light transition-colors disabled:opacity-50"
         >
-          {status === 'denied' ? 'Try again' : 'Start listening'}
-        </button>
-      )}
-      {status === 'listening' && (
-        <button onClick={backToLocked} className="w-full rounded-xl border border-border py-3 text-sm mb-3 hover:border-amber transition-colors">
-          Cancel
-        </button>
-      )}
-
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          submitTypedPhrase(typed);
-        }}
-        className="flex gap-2"
-      >
-        <input
-          value={typed}
-          onChange={(e) => setTyped(e.target.value)}
-          placeholder="…or type your passphrase"
-          className="flex-1 rounded-xl bg-surface border border-border px-3 py-2.5 text-sm outline-none focus:border-amber transition-colors"
-        />
-        <button type="submit" className="rounded-xl border border-border px-4 text-sm font-medium hover:border-amber transition-colors">
-          Unlock
+          {loading ? 'Logging in…' : 'Log in'}
         </button>
       </form>
-
-      <button onClick={resetPassphrase} className="w-full text-center text-xs text-text-faint mt-6 hover:text-text-muted">
-        Forgot it? Reset passphrase
-      </button>
     </Shell>
   );
 }
 
 export function AuthGate({ children }: { children: ReactNode }) {
-  const { status, isAuthenticated } = useVoiceAuth();
+  const { status } = useAuth();
 
-  if (isAuthenticated) return <>{children}</>;
+  if (status === 'authenticated') return <>{children}</>;
 
-  if (status === 'initializing') {
+  if (status === 'checking') {
     return (
       <Shell>
-        <div className="flex justify-center">
-          <VoiceOrb status="initializing" soundLevel={0} />
+        <div className="flex flex-col items-center gap-4">
+          <ShieldCheck size={32} className="text-amber animate-pulse" />
         </div>
       </Shell>
     );

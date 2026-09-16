@@ -106,7 +106,7 @@ function SetupScreen() {
   );
 }
 
-function LoginScreen() {
+function LoginForm({ onForgot }: { onForgot: () => void }) {
   const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -130,8 +130,7 @@ function LoginScreen() {
   }
 
   return (
-    <Shell>
-      <Logo />
+    <>
       <form onSubmit={handleSubmit} className="space-y-3.5">
         <div className="relative">
           <UserRound size={15} className="absolute left-4 top-[38px] text-text-faint" />
@@ -150,6 +149,79 @@ function LoginScreen() {
           {loading ? 'Logging in…' : 'Log in'}
         </button>
       </form>
+      <button onClick={onForgot} className="w-full text-center text-xs text-text-faint mt-6 hover:text-amber transition-colors">
+        Forgot your username or password?
+      </button>
+    </>
+  );
+}
+
+function ResetForm({ onBack }: { onBack: () => void }) {
+  const { reset } = useAuth();
+  const [username, setUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!username.trim() || !newPassword || !apiKey.trim()) {
+      setError('Fill in every field.');
+      return;
+    }
+    if (newPassword.length < 8) {
+      setError('New password must be at least 8 characters.');
+      return;
+    }
+    if (newPassword !== confirm) {
+      setError("Passwords don't match.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await reset(username.trim(), newPassword, apiKey.trim());
+    } catch (err) {
+      setError(authErrorMessage(err));
+      setLoading(false);
+    }
+  }
+
+  return (
+    <>
+      <p className="text-sm text-text-muted text-center mb-6">
+        Reset your password using the backend's API key as proof it's really you — find it in Render's environment
+        variables (<code className="text-amber-light">CLA_API_KEY</code>), or wherever you first saved it.
+      </p>
+      <form onSubmit={handleSubmit} className="space-y-3.5">
+        <Field label="Username" value={username} onChange={setUsername} autoFocus />
+        <Field label="New password" type="password" value={newPassword} onChange={setNewPassword} placeholder="At least 8 characters" />
+        <Field label="Confirm new password" type="password" value={confirm} onChange={setConfirm} />
+        <Field label="Recovery key (CLA_API_KEY)" type="password" value={apiKey} onChange={setApiKey} />
+        {error && <p className="text-xs text-critical">{error}</p>}
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full rounded-xl bg-amber text-[#221604] font-semibold py-3 text-sm hover:bg-amber-light transition-colors disabled:opacity-50"
+        >
+          {loading ? 'Resetting…' : 'Reset password & log in'}
+        </button>
+      </form>
+      <button onClick={onBack} className="w-full text-center text-xs text-text-faint mt-6 hover:text-amber transition-colors">
+        Back to log in
+      </button>
+    </>
+  );
+}
+
+function LoginScreen() {
+  const [mode, setMode] = useState<'login' | 'reset'>('login');
+  return (
+    <Shell>
+      <Logo />
+      {mode === 'login' ? <LoginForm onForgot={() => setMode('reset')} /> : <ResetForm onBack={() => setMode('login')} />}
     </Shell>
   );
 }

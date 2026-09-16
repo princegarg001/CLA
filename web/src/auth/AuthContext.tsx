@@ -15,6 +15,7 @@ interface AuthState {
   name: string;
   setup: (name: string, username: string, password: string) => Promise<void>;
   login: (username: string, password: string) => Promise<void>;
+  reset: (username: string, newPassword: string, apiKey: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -57,13 +58,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [applySession]
   );
 
+  const reset = useCallback(
+    async (username: string, newPassword: string, apiKey: string) => {
+      const session = await api.post<Session>('/auth/reset', { username, newPassword, apiKey });
+      applySession(session);
+    },
+    [applySession]
+  );
+
   const logout = useCallback(() => {
     config.logout();
     setName('');
     setStatus('needsLogin');
   }, []);
 
-  return <AuthCtx.Provider value={{ status, name, setup, login, logout }}>{children}</AuthCtx.Provider>;
+  return <AuthCtx.Provider value={{ status, name, setup, login, reset, logout }}>{children}</AuthCtx.Provider>;
 }
 
 export function useAuth() {

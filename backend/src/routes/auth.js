@@ -51,4 +51,28 @@ router.post('/login', asyncHandler(async (req, res) => {
   ok(res, { name: user.name, username: user.username, apiKey: config.claApiKey });
 }));
 
+// POST /api/auth/reset — password recovery with no email/SMTP infrastructure
+// behind it: the recovery secret is the backend's own CLA_API_KEY (Settings
+// screen shows it once you're logged in anywhere else; it's also the value
+// pasted into Render). Anyone who has that key already has full API access
+// regardless of login, so gating a password reset behind it adds no new
+// exposure — it just lets you regain the *login UI* without touching the DB
+// by hand. If CLA_API_KEY is unset, the whole API is already unauthenticated
+// (see apiKeyAuth.js), so allowing the reset unconditionally in that case
+// matches the rest of the app's security model rather than contradicting it.
+router.post('/reset', asyncHandler(async (req, res) => {
+  const { username, newPassword, apiKey } = req.body || {};
+  if (!username || !newPassword) return fail(res, 400, 'username and newPassword are required');
+  if (String(newPassword).length < 8) return fail(res, 400, 'Password must be at least 8 characters');
+  if (config.claApiKey && apiKey !== config.claApiKey) return fail(res, 401, 'Wrong recovery key');
+
+  const users = await db.list('app_users', { filters: { username: String(username).trim().toLowerCase() } });
+  const user = users[0];
+  if (!user) return fail(res, 404, 'No account with that username');
+
+  const password_hash = await bcrypt.hash(newPassword, 12);
+  await db.update('app_users', user.id, { password_hash });
+  ok(res, { name: user.name, username: user.username, apiKey: config.claApiKey });
+}));
+
 module.exports = router;

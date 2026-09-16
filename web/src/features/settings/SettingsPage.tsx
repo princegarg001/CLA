@@ -29,7 +29,7 @@ const META: Record<string, string> = {
   gro: 'Gro.app',
   smtp: 'Email Alerts (SMTP)',
   linkedin: 'LinkedIn',
-  instagram: 'Instagram',
+  facebook: 'Facebook Page',
   firebase: 'Firebase (push)',
 };
 
@@ -81,9 +81,9 @@ function ConnectedAccounts() {
 
   if (isLoading) return <LoadingState />;
 
-  const rows: { platform: 'linkedin' | 'instagram'; label: string; color: string; connected: boolean }[] = [
+  const rows: { platform: 'linkedin' | 'facebook'; label: string; color: string; connected: boolean }[] = [
     { platform: 'linkedin', label: 'LinkedIn', color: '#0077B5', connected: !!status?.linkedin?.connected },
-    { platform: 'instagram', label: 'Instagram', color: '#E1306C', connected: !!status?.instagram?.connected },
+    { platform: 'facebook', label: 'Facebook Page', color: '#1877F2', connected: !!status?.facebook?.connected },
   ];
 
   return (

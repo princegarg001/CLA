@@ -1,6 +1,6 @@
 const twitterService = require('./twitterService');
 const linkedinService = require('./linkedinService');
-const instagramService = require('./instagramService');
+const facebookService = require('./facebookService');
 const redditService = require('./redditService');
 const logger = require('../utils/logger');
 
@@ -24,12 +24,8 @@ async function publishToPlatform(platform, entry) {
     }
     case 'linkedin':
       return linkedinService.postText(content);
-    case 'instagram': {
-      if (postType === 'carousel') return instagramService.postCarousel(mediaUrls, content);
-      if (postType === 'reel') return instagramService.postReel(mediaUrls[0], content);
-      if (postType === 'story') return instagramService.postStory({ imageUrl: mediaUrls[0] });
-      return instagramService.postImage(mediaUrls[0], content);
-    }
+    case 'facebook':
+      return facebookService.postText(content, mediaUrls[0]);
     case 'reddit': {
       if (postType === 'comment') {
         if (!raw.parentFullname) return { status: 'skipped', reason: 'Reddit comment needs raw.parentFullname.' };

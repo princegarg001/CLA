@@ -17,7 +17,7 @@ export interface SocialPlatformStatus {
 
 export interface SocialStatus {
   linkedin: SocialPlatformStatus;
-  instagram: SocialPlatformStatus;
+  facebook: SocialPlatformStatus;
   twitter: { appConfigured: boolean; connected: boolean };
   reddit: SocialPlatformStatus;
 }
@@ -28,7 +28,7 @@ export function useSocialStatus() {
 
 export function useConnectPlatform() {
   return useMutation({
-    mutationFn: async (platform: 'linkedin' | 'instagram') => {
+    mutationFn: async (platform: 'linkedin' | 'facebook') => {
       const { url } = await api.get<{ url: string }>(`/social/${platform}/auth-url`);
       window.open(url, '_blank', 'noopener,noreferrer');
     },
@@ -38,7 +38,7 @@ export function useConnectPlatform() {
 export function useDisconnectPlatform() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (platform: 'linkedin' | 'instagram') => api.post(`/social/${platform}/disconnect`),
+    mutationFn: (platform: 'linkedin' | 'facebook') => api.post(`/social/${platform}/disconnect`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['social', 'status'] }),
   });
 }

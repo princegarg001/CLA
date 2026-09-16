@@ -12,7 +12,7 @@ function getClient() {
   return client;
 }
 
-// Instagram's Graph API needs a publicly reachable image_url — it fetches
+// Facebook's Graph API needs a publicly reachable image url — it fetches
 // the image itself rather than accepting raw bytes — so a picked photo has
 // to be hosted somewhere before /api/social/publish can pass it along.
 // Uploads to a public Supabase Storage bucket and returns that public URL.

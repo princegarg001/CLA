@@ -281,25 +281,6 @@ export interface RedditKarma {
   sample?: boolean;
 }
 
-export interface InstagramInsights {
-  reach: number;
-  impressions: number;
-  followerCount?: number | null;
-  profileViews: number;
-  sample?: boolean;
-}
-
-export interface InstagramMedia {
-  id: string;
-  caption: string;
-  mediaType: string;
-  permalink?: string | null;
-  timestamp?: string | null;
-  likeCount: number;
-  commentsCount: number;
-  thumbnailUrl?: string | null;
-}
-
 // ---- AI Agent Lab -------------------------------------------------------------
 
 export interface AgentInfo {

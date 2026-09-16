@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../core/apiClient';
-import type { GumroadStats, InstagramInsights, InstagramMedia, Lead, PublishResult, ScheduledPost, TwitterAnalytics } from '../types';
+import type { GumroadStats, Lead, PublishResult, ScheduledPost, TwitterAnalytics } from '../types';
 
 export function usePublish() {
   const qc = useQueryClient();
@@ -40,12 +40,4 @@ export function useGenerateThread() {
 
 export function useBetalistSignups() {
   return useQuery({ queryKey: ['leads', { source: 'betalist' }], queryFn: () => api.get<Lead[]>('/leads', { source: 'betalist' }) });
-}
-
-export function useInstagramInsights() {
-  return useQuery({ queryKey: ['social', 'instagram', 'insights'], queryFn: () => api.get<InstagramInsights>('/social/instagram/insights') });
-}
-
-export function useInstagramMedia() {
-  return useQuery({ queryKey: ['social', 'instagram', 'media'], queryFn: () => api.get<InstagramMedia[]>('/social/instagram/media') });
 }

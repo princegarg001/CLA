@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const linkedinService = require('../services/linkedinService');
-const instagramService = require('../services/instagramService');
+const facebookService = require('../services/facebookService');
 const logger = require('../utils/logger');
 
 // LinkedIn/Meta redirect the USER'S BROWSER here directly after they approve
@@ -30,14 +30,14 @@ router.get('/linkedin/callback', async (req, res) => {
   }
 });
 
-router.get('/instagram/callback', async (req, res) => {
+router.get('/facebook/callback', async (req, res) => {
   const { code, error, error_description: errorDescription } = req.query;
   if (error) return resultPage(res, { ok: false, message: errorDescription || error });
   try {
-    const result = await instagramService.handleCallback(code);
-    resultPage(res, { ok: true, message: `Instagram connected via Page "${result.name}".` });
+    const result = await facebookService.handleCallback(code);
+    resultPage(res, { ok: true, message: `Facebook connected to Page "${result.name}".` });
   } catch (e) {
-    logger.error('Instagram OAuth callback failed', { error: e.response?.data || e.message });
+    logger.error('Facebook OAuth callback failed', { error: e.response?.data || e.message });
     resultPage(res, { ok: false, message: e.message });
   }
 });

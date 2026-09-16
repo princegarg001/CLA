@@ -156,7 +156,7 @@ const CHECKS = {
   // token stored in oauth_connections) is reported separately by
   // GET /api/social/status, since that requires a DB read this sync check can't do.
   linkedin: () => !!(config.linkedinClientId && config.linkedinClientSecret),
-  instagram: () => !!(config.metaAppId && config.metaAppSecret),
+  facebook: () => !!(config.metaAppId && config.metaAppSecret),
   // Reddit uses a "script" app tied to your own account — there's no browser
   // OAuth step, so having the four credentials IS being connected.
   reddit: () =>

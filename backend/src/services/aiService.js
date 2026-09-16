@@ -137,12 +137,12 @@ const FALLBACK_WEEK_PLAN = [
   { platform: 'twitter', postType: 'thread', dayOffset: 3, content: 'Hook: Why most MVPs outgrow their backend in under 6 months.\n\nBody 1...\nBody 2...\n\nCTA: Let\'s talk if you\'re hitting this.' },
   { platform: 'linkedin', postType: 'post', dayOffset: 2, content: 'A short thought-leadership post on backend reliability for funded startups. [AI unavailable — draft manually]' },
   { platform: 'reddit', postType: 'post', dayOffset: 4, content: 'An educational, value-first post for r/SaaS or r/startups. [AI unavailable — draft manually]' },
-  { platform: 'instagram', postType: 'carousel', dayOffset: 5, content: 'Visual tips carousel concept: "3 signs your backend won\'t scale." [AI unavailable — draft manually]' },
+  { platform: 'facebook', postType: 'post', dayOffset: 5, content: 'A short update-style post: what shipped this week and why it matters for founders evaluating backend partners. [AI unavailable — draft manually]' },
 ];
 
 // Workflow 2 ("The Publisher"): given last week's per-platform engagement,
 // generate 5 content pieces for the coming week — 2 Twitter threads, 1
-// LinkedIn post, 1 Reddit post, 1 Instagram carousel — per the fixed content
+// LinkedIn post, 1 Reddit post, 1 Facebook post — per the fixed content
 // mix in the plan. Returns an array even on AI failure (a manual-draft
 // fallback set) so the calendar always gets filled with *something* to edit.
 async function generateWeeklyContentPlan(engagement) {
@@ -150,11 +150,11 @@ async function generateWeeklyContentPlan(engagement) {
     {
       system:
         'You are a content strategist for AlphoTech, a backend engineering/automation studio for funded startups. ' +
-        'Given last week\'s engagement metrics across Twitter, LinkedIn, Reddit and Instagram, plan exactly 5 content pieces for ' +
+        'Given last week\'s engagement metrics across Twitter, LinkedIn, Reddit and Facebook, plan exactly 5 content pieces for ' +
         'the coming week: 2 Twitter threads, 1 LinkedIn post, 1 Reddit post (educational, value-first, no self-promotion), ' +
-        '1 Instagram carousel concept. Base topics on what performed best last week when the data suggests something. ' +
-        'Respond with ONLY a JSON object: {"items": [{"platform": "twitter|linkedin|reddit|instagram", ' +
-        '"postType": "thread|post|carousel", "dayOffset": <1-7, days from today>, "content": "<the actual copy; ' +
+        '1 Facebook Page post. Base topics on what performed best last week when the data suggests something. ' +
+        'Respond with ONLY a JSON object: {"items": [{"platform": "twitter|linkedin|reddit|facebook", ' +
+        '"postType": "thread|post", "dayOffset": <1-7, days from today>, "content": "<the actual copy; ' +
         'for a thread separate tweets with a blank line>"}]} — exactly 5 items.',
       prompt: JSON.stringify(engagement || {}),
       json: true,

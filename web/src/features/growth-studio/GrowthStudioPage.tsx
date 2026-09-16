@@ -8,12 +8,9 @@ import {
   X,
   AtSign,
   Briefcase,
-  Camera,
+  ThumbsUp,
   Eye,
   Heart,
-  BarChart3,
-  Users2,
-  Search,
   Download,
   ShoppingCart,
   Rocket,
@@ -23,14 +20,14 @@ import {
   ArrowUpRight,
   MessageSquare,
 } from 'lucide-react';
-import { usePublish, useUploadImage, useGumroadStats, useTwitterAnalytics, useTwitterScheduled, useGenerateThread, useBetalistSignups, useInstagramInsights, useInstagramMedia } from '../../data/hooks/useGrowth';
+import { usePublish, useUploadImage, useGumroadStats, useTwitterAnalytics, useTwitterScheduled, useGenerateThread, useBetalistSignups } from '../../data/hooks/useGrowth';
 import { useSocialStatus } from '../../data/hooks/useSettings';
 import { useCalendarEntries, useApproveCalendarEntry, usePublishCalendarEntryNow, useCancelCalendarEntry, useFillWeek } from '../../data/hooks/useCalendar';
 import { useRedditOpportunities, useRedditKarma, useDraftRedditReply, useSendRedditReply } from '../../data/hooks/useReddit';
 import { Card, TabBar, IconButton, StatCard, Badge, AccentButton, LoadingState, EmptyState, InitialsAvatar } from '../../components/ui';
 import { leadDisplayName, type RedditPost } from '../../data/types';
 
-const PLATFORM_DOT: Record<string, string> = { twitter: '#1DA1F2', linkedin: '#0077B5', instagram: '#E1306C', reddit: '#FF4500' };
+const PLATFORM_DOT: Record<string, string> = { twitter: '#1DA1F2', linkedin: '#0077B5', facebook: '#1877F2', reddit: '#FF4500' };
 
 function AutoPostTab() {
   const { data: status } = useSocialStatus();
@@ -52,7 +49,6 @@ function AutoPostTab() {
 
   async function handlePublish() {
     if (platforms.size === 0 || !text.trim()) return;
-    if (platforms.has('instagram') && !file) return;
     let imageUrl: string | undefined;
     if (file) {
       const r = await uploadImage.mutateAsync(file);
@@ -71,7 +67,7 @@ function AutoPostTab() {
   const chips: { key: string; label: string; icon: typeof AtSign; connected: boolean }[] = [
     { key: 'twitter', label: 'Twitter/X', icon: AtSign, connected: !!status?.twitter?.connected },
     { key: 'linkedin', label: 'LinkedIn', icon: Briefcase, connected: !!status?.linkedin?.connected },
-    { key: 'instagram', label: 'Instagram', icon: Camera, connected: !!status?.instagram?.connected },
+    { key: 'facebook', label: 'Facebook Page', icon: ThumbsUp, connected: !!status?.facebook?.connected },
   ];
 
   return (
@@ -304,55 +300,6 @@ function RedditTab() {
   );
 }
 
-function InstagramTab() {
-  const { data: insights, isLoading } = useInstagramInsights();
-  const { data: media } = useInstagramMedia();
-
-  if (isLoading && !insights) return <LoadingState />;
-  return (
-    <div className="space-y-4">
-      {insights && (
-        <>
-          <div className="grid grid-cols-2 gap-3">
-            <StatCard icon={Eye} label="Reach" value={`${insights.reach}`} />
-            <StatCard icon={BarChart3} label="Impressions" value={`${insights.impressions}`} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <StatCard icon={Users2} label="Followers" value={`${insights.followerCount ?? '—'}`} />
-            <StatCard icon={Search} label="Profile Views" value={`${insights.profileViews}`} />
-          </div>
-          {insights.sample && <Badge tone="warning">Sample data — connect Instagram in Settings</Badge>}
-        </>
-      )}
-      <p className="text-[15px] font-bold">Recent Posts</p>
-      {!media?.length ? (
-        <EmptyState text="No posts yet." />
-      ) : (
-        <div className="space-y-2">
-          {media.map((m) => (
-            <Card key={m.id} className="p-3 flex gap-3">
-              <div className="h-11 w-11 rounded-lg bg-[#E1306C1F] flex items-center justify-center shrink-0 overflow-hidden">
-                {m.thumbnailUrl ? <img src={m.thumbnailUrl} alt="" className="h-full w-full object-cover" /> : <Camera size={18} color="#E1306C" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs line-clamp-2">{m.caption || '(no caption)'}</p>
-                <div className="flex items-center gap-3 mt-1.5 text-[11px] text-text-faint">
-                  <span className="flex items-center gap-1">
-                    <Heart size={11} /> {m.likeCount}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <MessageSquare size={11} /> {m.commentsCount}
-                  </span>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function TwitterTab() {
   const { data: analytics } = useTwitterAnalytics();
   const { data: scheduled } = useTwitterScheduled();
@@ -538,15 +485,14 @@ export function GrowthStudioPage() {
         ))}
       </div>
 
-      <TabBar tabs={['Auto-Post', 'Calendar', 'Reddit', 'Instagram', 'Twitter/X', 'Gumroad', 'BetaList']} active={tab} onChange={setTab} />
+      <TabBar tabs={['Auto-Post', 'Calendar', 'Reddit', 'Twitter/X', 'Gumroad', 'BetaList']} active={tab} onChange={setTab} />
 
       {tab === 0 && <AutoPostTab />}
       {tab === 1 && <CalendarTab />}
       {tab === 2 && <RedditTab />}
-      {tab === 3 && <InstagramTab />}
-      {tab === 4 && <TwitterTab />}
-      {tab === 5 && <GumroadTab />}
-      {tab === 6 && <BetaListTab />}
+      {tab === 3 && <TwitterTab />}
+      {tab === 4 && <GumroadTab />}
+      {tab === 5 && <BetaListTab />}
     </div>
   );
 }

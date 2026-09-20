@@ -83,6 +83,13 @@ const config = {
   smtpUser: process.env.SMTP_USER || '',
   smtpPass: process.env.SMTP_PASS || '',
   alertEmailTo: process.env.ALERT_EMAIL_TO || '',
+  // Outreach: the same mailbox sends (SMTP) and is read for replies (IMAP). Gmail needs an
+  // App Password for both. IMAP falls back to the SMTP login when not set separately.
+  smtpFromName: process.env.SMTP_FROM_NAME || '',
+  imapHost: process.env.IMAP_HOST || '',
+  imapPort: parseInt(process.env.IMAP_PORT || '993', 10),
+  imapUser: process.env.IMAP_USER || '',
+  imapPass: process.env.IMAP_PASS || '',
 
   // ---- Social publishing (Automation Engine) --------------------------------
   linkedinClientId: process.env.LINKEDIN_CLIENT_ID || '',
@@ -151,6 +158,7 @@ const CHECKS = {
   foundersDb: () => !!config.foundersDbKey,
   paperclip: () => !!config.paperclipKey,
   smtp: () => !!(config.smtpHost && config.smtpUser && config.smtpPass),
+  imap: () => !!((config.imapHost || config.smtpHost) && (config.imapUser || config.smtpUser) && (config.imapPass || config.smtpPass)),
   // These reflect "the app credentials exist so the OAuth flow can start" —
   // not "an account is actually connected". Actual connection status (a real
   // token stored in oauth_connections) is reported separately by

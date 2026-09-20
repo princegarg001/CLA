@@ -13,6 +13,7 @@ import {
   type RecItem,
   type RecKind,
 } from '../../data/hooks/useRecommendations';
+import { useMailStatus, useSendFromLead } from '../../data/hooks/useOutreach';
 import { Card, Badge, AccentButton, LoadingState, EmptyState, ErrorState, TabBar } from '../../components/ui';
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -47,6 +48,9 @@ function RecCard({ item }: { item: RecItem }) {
   const rec = recOf(lead);
   const setStatus = useSetLeadStatus();
   const dismiss = useDismissRec();
+  const { data: mailStatus } = useMailStatus();
+  const sendFromLead = useSendFromLead();
+  const [sendError, setSendError] = useState<string | null>(null);
   const [draft, setDraft] = useState(rec?.draft || '');
   const [copied, setCopied] = useState(false);
   const [dismissing, setDismissing] = useState(false);
@@ -57,6 +61,19 @@ function RecCard({ item }: { item: RecItem }) {
   const score10 = lead.score;
   const subject = `Re: ${lead.role || 'your post'}`;
   const mailto = lead.email ? `mailto:${lead.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(draft)}` : null;
+
+  async function sendViaCla() {
+    if (!lead.email) return;
+    if (!window.confirm(`Send this email to ${lead.email} now from your mailbox?
+
+Subject: ${subject}`)) return;
+    setSendError(null);
+    try {
+      await sendFromLead.mutateAsync({ leadId: lead.id, subject, body: draft, send: true });
+    } catch (e) {
+      setSendError(e instanceof Error ? e.message : 'Could not send');
+    }
+  }
 
   async function copy() {
     try {
@@ -123,9 +140,14 @@ function RecCard({ item }: { item: RecItem }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mt-3">
+        {lead.email && !done && mailStatus?.mail.smtp.configured && (
+          <button onClick={sendViaCla} disabled={sendFromLead.isPending} className="inline-flex items-center gap-1.5 rounded-lg bg-amber text-[#221604] px-3 py-1.5 text-xs font-semibold hover:bg-amber-light disabled:opacity-50">
+            <Mail size={12} /> {sendFromLead.isPending ? 'Sending…' : `Send to ${lead.email}`}
+          </button>
+        )}
         {mailto && (
-          <a href={mailto} className="inline-flex items-center gap-1.5 rounded-lg bg-amber text-[#221604] px-3 py-1.5 text-xs font-semibold hover:bg-amber-light">
-            <Mail size={12} /> Email {lead.email}
+          <a href={mailto} className="inline-flex items-center gap-1.5 rounded-lg border border-border-soft px-3 py-1.5 text-xs font-medium hover:border-amber">
+            <Mail size={12} /> Open in my email app
           </a>
         )}
         <a href={rec.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border-soft px-3 py-1.5 text-xs font-medium hover:border-amber">
@@ -152,6 +174,8 @@ function RecCard({ item }: { item: RecItem }) {
           </>
         )}
       </div>
+
+      {sendError && <p className="mt-2 text-xs text-critical">{sendError}</p>}
 
       {dismissing && (
         <div className="mt-2 flex flex-wrap gap-1.5">

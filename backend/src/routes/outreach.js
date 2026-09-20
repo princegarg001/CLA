@@ -1,10 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const aiService = require('../services/aiService');
+const outreach = require('../services/outreachService');
+const mailService = require('../services/mailService');
 const { asyncHandler, ok, fail } = require('../utils/helpers');
+const { strictLimiter } = require('../middleware/rateLimiter');
 
-// GET /api/outreach/inbox?channel=&status= — unified inbox across every channel
+// GET /api/outreach/overview — everything the Outreach screen needs in one call:
+// real stats, conversation threads, mailbox status and settings.
+router.get('/overview', asyncHandler(async (req, res) => ok(res, await outreach.overview())));
+
+// GET /api/outreach/inbox?channel=&status= — flat message list (kept for older callers)
 router.get('/inbox', asyncHandler(async (req, res) => {
   const { channel, status } = req.query;
   let messages = await db.list('messages', { orderBy: { column: 'created_at', ascending: false } });
@@ -13,49 +19,113 @@ router.get('/inbox', asyncHandler(async (req, res) => {
   ok(res, messages);
 }));
 
-// POST /api/outreach/generate — AI drafts a message for a lead in the requested tone/market
+// ---- mailbox ----------------------------------------------------------------------
+
+router.get('/status', asyncHandler(async (req, res) => ok(res, { mail: mailService.status(), settings: await outreach.getSettings() })));
+
+// POST /api/outreach/email/verify — actually connects to SMTP and IMAP and reports each result.
+router.post('/email/verify', strictLimiter, asyncHandler(async (req, res) => ok(res, await mailService.verify())));
+
+router.get('/settings', asyncHandler(async (req, res) => ok(res, await outreach.getSettings())));
+router.put('/settings', asyncHandler(async (req, res) => ok(res, await outreach.saveSettings(req.body || {}))));
+
+// POST /api/outreach/sync — check the mailbox for replies right now (a cron also does this).
+router.post('/sync', strictLimiter, asyncHandler(async (req, res) => ok(res, await outreach.syncReplies())));
+
+// POST /api/outreach/followups/run — build due follow-up drafts right now.
+router.post('/followups/run', strictLimiter, asyncHandler(async (req, res) => ok(res, await outreach.runFollowups())));
+
+// ---- do-not-contact list ----------------------------------------------------------
+
+router.get('/suppressed', asyncHandler(async (req, res) => ok(res, await outreach.getSuppressed())));
+router.delete('/suppressed/:email', asyncHandler(async (req, res) => {
+  await outreach.unsuppress(decodeURIComponent(req.params.email));
+  ok(res, await outreach.getSuppressed());
+}));
+
+// ---- messages ---------------------------------------------------------------------
+
+// POST /api/outreach/generate — AI (or a template) drafts an email for a lead.
 router.post('/generate', asyncHandler(async (req, res) => {
-  const { leadId, tone, market, channel } = req.body || {};
+  const { leadId, tone, market, channel, templateId } = req.body || {};
   if (!leadId || !channel) return fail(res, 400, 'leadId and channel are required');
-  const lead = await db.get('leads', leadId);
-  if (!lead) return fail(res, 404, 'Lead not found');
-
-  const body = await aiService.generateOutreachMessage({ lead, tone, market, channel });
-  const draft = await db.insert('messages', {
-    lead_id: leadId, channel, tone, market, body, direction: 'outbound', ai_generated: true, status: 'draft',
-  });
-  ok(res, draft);
+  ok(res, await outreach.createDraft({ leadId, channel, tone, market, templateId }));
 }));
 
+// POST /api/outreach/messages — save a hand-written draft.
 router.post('/messages', asyncHandler(async (req, res) => {
-  const message = await db.insert('messages', { direction: 'outbound', status: 'draft', ...req.body });
-  ok(res, message);
+  const { leadId, channel = 'apollo_email', subject, body, to, tone, market } = req.body || {};
+  if (!body || !String(body).trim()) return fail(res, 400, 'body is required');
+  ok(res, await outreach.createDraft({ leadId, channel, subject, body, to, tone, market }));
 }));
 
-// PATCH /api/outreach/messages/:id — approve/edit, and send when status becomes "sent"
+// POST /api/outreach/from-lead — used by Daily Leads: turn a lead's drafted message into an email,
+// and optionally send it in the same step.
+router.post('/from-lead', strictLimiter, asyncHandler(async (req, res) => {
+  const { leadId, subject, body, send, force } = req.body || {};
+  if (!leadId || !body) return fail(res, 400, 'leadId and body are required');
+  const draft = await outreach.createDraft({ leadId, channel: 'email', subject: subject || 'Quick question', body });
+  if (!send) return ok(res, { message: draft });
+  ok(res, await outreach.sendMessage(draft.id, { force: !!force }));
+}));
+
+// PATCH /api/outreach/messages/:id — edit a draft. Status changes go through the explicit actions
+// below, so nothing can be marked "sent" without actually being sent.
 router.patch('/messages/:id', asyncHandler(async (req, res) => {
   const existing = await db.get('messages', req.params.id);
   if (!existing) return fail(res, 404, 'Message not found');
+  if (req.body && req.body.status) return fail(res, 400, 'Use /send, /mark-sent or /replied to change a message status');
+  if (!['draft', 'failed'].includes(existing.status)) return fail(res, 409, `A ${existing.status} message can no longer be edited`);
+  const { subject, body, channel, tone, market, to } = req.body || {};
+  const patch = {};
+  if (typeof subject === 'string') patch.subject = subject.slice(0, 300);
+  if (typeof body === 'string') patch.body = body;
+  if (typeof channel === 'string') patch.channel = channel;
+  if (typeof tone === 'string') patch.tone = tone;
+  if (typeof market === 'string') patch.market = market;
+  if (typeof to === 'string') patch.meta = { ...(existing.meta || {}), to: to.trim() };
+  ok(res, await db.update('messages', req.params.id, patch));
+}));
 
-  const patch = { ...req.body };
-  if (patch.status === 'sent') {
-    // Twitter DMs require Basic tier+; postTweet path only applies to public tweets, not DMs —
-    // sending logic for DMs is a placeholder until Basic tier credentials are wired in. Both
-    // branches just stamp sent_at either way, so they've been collapsed into one.
-    patch.sent_at = new Date().toISOString();
-  }
-  const updated = await db.update('messages', req.params.id, patch);
+// POST /api/outreach/messages/:id/send { force? } — really sends the email.
+router.post('/messages/:id/send', strictLimiter, asyncHandler(async (req, res) => {
+  ok(res, await outreach.sendMessage(req.params.id, { force: !!(req.body && req.body.force) }));
+}));
+
+// POST /api/outreach/messages/:id/mark-sent — for LinkedIn/Twitter/Reddit/etc: you sent it there.
+router.post('/messages/:id/mark-sent', asyncHandler(async (req, res) => ok(res, await outreach.markSent(req.params.id))));
+
+// POST /api/outreach/messages/:id/replied { text? } — record a reply that arrived outside the mailbox.
+router.post('/messages/:id/replied', asyncHandler(async (req, res) => ok(res, await outreach.recordReply(req.params.id, { text: req.body && req.body.text }))));
+
+router.delete('/messages/:id', asyncHandler(async (req, res) => {
+  const existing = await db.get('messages', req.params.id);
+  if (!existing) return fail(res, 404, 'Message not found');
+  if (!['draft', 'failed'].includes(existing.status)) return fail(res, 409, 'Only drafts can be deleted; sent messages are your record');
+  await db.remove('messages', req.params.id);
+  ok(res, { id: req.params.id });
+}));
+
+// ---- templates --------------------------------------------------------------------
+
+router.get('/templates', asyncHandler(async (req, res) => ok(res, await db.list('templates'))));
+
+router.post('/templates', asyncHandler(async (req, res) => {
+  const { name, category, tone, market, body } = req.body || {};
+  if (!name || !body) return fail(res, 400, 'name and body are required');
+  ok(res, await db.insert('templates', { name, category: category || null, tone: tone || null, market: market || null, body }));
+}));
+
+router.put('/templates/:id', asyncHandler(async (req, res) => {
+  const { name, category, tone, market, body } = req.body || {};
+  const updated = await db.update('templates', req.params.id, { name, category, tone, market, body });
+  if (!updated) return fail(res, 404, 'Template not found');
   ok(res, updated);
 }));
 
-router.get('/templates', asyncHandler(async (req, res) => {
-  const templates = await db.list('templates');
-  ok(res, templates);
-}));
-
-router.post('/templates', asyncHandler(async (req, res) => {
-  const template = await db.insert('templates', req.body || {});
-  ok(res, template);
+router.delete('/templates/:id', asyncHandler(async (req, res) => {
+  await db.remove('templates', req.params.id);
+  ok(res, { id: req.params.id });
 }));
 
 module.exports = router;

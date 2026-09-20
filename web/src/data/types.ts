@@ -465,8 +465,27 @@ export interface OutreachMessage {
   subject?: string | null;
   body: string;
   ai_generated: boolean;
-  status: 'draft' | 'sent' | 'replied';
+  status: 'draft' | 'sending' | 'sent' | 'replied' | 'failed' | 'received';
+  sent_at?: string | null;
   created_at?: string | null;
+  meta?: MessageMeta | null;
+}
+
+export interface MessageMeta {
+  to?: string | null;
+  messageId?: string;
+  threadId?: string;
+  followupStep?: number;
+  followupOf?: string;
+  nextFollowupAt?: string | null;
+  manual?: boolean;
+  lastError?: string | null;
+  bounced?: boolean;
+  repliedAt?: string;
+  kind?: string;
+  from?: string;
+  intent?: string;
+  next?: string;
 }
 
 export interface MessageTemplate {

@@ -1,0 +1,217 @@
+const { randomUUID } = require('crypto');
+const config = require('../config');
+const logger = require('../utils/logger');
+
+// Real email for outreach: send through the founder's own mailbox (SMTP) and read the same
+// mailbox (IMAP) to detect replies, bounces and unsubscribes. Nothing here is simulated: when
+// the mailbox is not configured every function says so instead of pretending.
+
+// ---- configuration --------------------------------------------------------------
+
+function guessImapHost(smtpHost = '') {
+  if (/office365|outlook/i.test(smtpHost)) return 'outlook.office365.com';
+  // GoDaddy Workspace Email sends via smtpout.secureserver.net but is read via imap.secureserver.net.
+  if (/secureserver.net/i.test(smtpHost)) return 'imap.secureserver.net';
+  return smtpHost.replace(/^smtp\./i, 'imap.');
+}
+
+function smtpConfigured() {
+  return config.isConfigured('smtp');
+}
+
+function imapSettings() {
+  return {
+    host: config.imapHost || guessImapHost(config.smtpHost),
+    port: config.imapPort || 993,
+    user: config.imapUser || config.smtpUser,
+    pass: config.imapPass || config.smtpPass,
+  };
+}
+
+function imapConfigured() {
+  const s = imapSettings();
+  return !!(s.host && s.user && s.pass);
+}
+
+const fromAddress = () => config.smtpUser;
+const fromHeader = () => (config.smtpFromName ? `"${config.smtpFromName.replace(/"/g, '')}" <${config.smtpUser}>` : config.smtpUser);
+
+// ---- sending --------------------------------------------------------------------
+
+let transporter = null;
+function getTransporter() {
+  if (!transporter) {
+    const nodemailer = require('nodemailer');
+    transporter = nodemailer.createTransport({
+      host: config.smtpHost,
+      port: config.smtpPort,
+      secure: config.smtpPort === 465,
+      auth: { user: config.smtpUser, pass: config.smtpPass },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 30000,
+    });
+  }
+  return transporter;
+}
+
+const EMAIL_RE = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]{2,}$/;
+const isEmail = (v) => EMAIL_RE.test(String(v || '').trim());
+
+// Sends one plain-text email. The Message-ID is created here (not by the server) so it is
+// known before delivery and can be matched against replies later.
+async function send({ to, subject, text, inReplyTo, references }) {
+  if (!smtpConfigured()) throw Object.assign(new Error('Email is not set up. Add SMTP_HOST, SMTP_USER and SMTP_PASS on the server.'), { status: 503 });
+  if (!isEmail(to)) throw Object.assign(new Error(`"${to}" is not a valid email address`), { status: 400 });
+  const domain = (config.smtpUser.split('@')[1] || 'localhost').toLowerCase();
+  const messageId = `<${randomUUID()}@${domain}>`;
+  try {
+    const info = await getTransporter().sendMail({
+      from: fromHeader(),
+      to,
+      subject,
+      text,
+      messageId,
+      inReplyTo: inReplyTo || undefined,
+      references: references && references.length ? references : inReplyTo || undefined,
+      headers: { 'List-Unsubscribe': `<mailto:${fromAddress()}?subject=unsubscribe>` },
+    });
+    if (info.rejected && info.rejected.length) throw new Error(`The server rejected ${info.rejected.join(', ')}`);
+    return { messageId, accepted: info.accepted || [to] };
+  } catch (e) {
+    logger.error('mailService.send failed', { error: e.message });
+    throw Object.assign(new Error(friendlySmtpError(e)), { status: e.status || 502 });
+  }
+}
+
+function friendlySmtpError(e) {
+  const m = String(e.message || e);
+  if (/535|Invalid login|Username and Password not accepted|AUTH/i.test(m)) return 'The mailbox rejected the login. For Gmail use an App Password, not your normal password.';
+  if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ESOCKET/i.test(m)) return `Could not reach the mail server (${config.smtpHost}:${config.smtpPort}). Check SMTP_HOST and SMTP_PORT.`;
+  return m;
+}
+
+// ---- reading --------------------------------------------------------------------
+
+// Drops the quoted history so only what the person actually wrote is kept.
+function stripQuoted(text = '') {
+  const lines = String(text).replace(/\r\n/g, '\n').split('\n');
+  const out = [];
+  for (const line of lines) {
+    if (/^\s*>/.test(line)) break;
+    if (/^\s*On .{5,200}wrote:\s*$/i.test(line)) break;
+    if (/^\s*-{2,}\s*(Original Message|Forwarded message)/i.test(line)) break;
+    if (/^\s*From:\s.+/i.test(line) && out.length > 0 && /^\s*$/.test(out[out.length - 1])) break;
+    out.push(line);
+  }
+  return out.join('\n').trim();
+}
+
+const BOUNCE_FROM_RE = /(mailer-daemon|postmaster|mail delivery subsystem)/i;
+const BOUNCE_SUBJECT_RE = /(undeliver|delivery status notification|delivery failure|returned mail|failure notice|couldn'?t be delivered|address not found)/i;
+const AUTO_SUBJECT_RE = /(out of office|automatic reply|auto[- ]?reply|autoreply|vacation|away from)/i;
+const UNSUBSCRIBE_RE = /\b(unsubscribe|remove me|take me off|stop (emailing|contacting|sending)|do not (email|contact)|don'?t (email|contact)|not interested|no thanks|no thank you)\b/i;
+
+// bounce | auto_reply | unsubscribe | reply
+function classifyInbound({ from = '', subject = '', text = '', autoSubmitted = '' }) {
+  if (BOUNCE_FROM_RE.test(from) || BOUNCE_SUBJECT_RE.test(subject)) return 'bounce';
+  if ((autoSubmitted && autoSubmitted.toLowerCase() !== 'no') || AUTO_SUBJECT_RE.test(subject)) return 'auto_reply';
+  // Only the first lines count: a signature or a long thread quoting "unsubscribe" is not a request.
+  if (UNSUBSCRIBE_RE.test(String(text).split('\n').slice(0, 6).join(' ').slice(0, 400))) return 'unsubscribe';
+  return 'reply';
+}
+
+// The address a bounce is about (the one we sent to), when the notice names it.
+function bouncedRecipient(text = '') {
+  const m = /(?:Final-Recipient|Original-Recipient):\s*rfc822;\s*([^\s>]+)/i.exec(text) || /(?:to|for|address)\s*[:<]?\s*<?([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})>?/i.exec(text);
+  return m ? m[1].toLowerCase() : null;
+}
+
+const addrOf = (v) => {
+  const a = v && v.value && v.value[0];
+  return a && a.address ? a.address.toLowerCase() : '';
+};
+
+async function fetchInbound({ since, limit = 200 } = {}) {
+  if (!imapConfigured()) return [];
+  const { ImapFlow } = require('imapflow');
+  const { simpleParser } = require('mailparser');
+  const s = imapSettings();
+  const client = new ImapFlow({ host: s.host, port: s.port, secure: s.port === 993, auth: { user: s.user, pass: s.pass }, logger: false });
+  client.on('error', (e) => logger.warn('mailService: imap error', { error: e.message }));
+  const out = [];
+  await client.connect();
+  try {
+    const lock = await client.getMailboxLock('INBOX');
+    try {
+      const uids = await client.search({ since: since || new Date(Date.now() - 3 * 86400000) }, { uid: true });
+      for (const uid of (uids || []).slice(-limit)) {
+        const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
+        if (!msg || !msg.source) continue;
+        const p = await simpleParser(msg.source);
+        const from = addrOf(p.from);
+        const subject = p.subject || '';
+        const bodyText = p.text || '';
+        const references = Array.isArray(p.references) ? p.references : p.references ? [p.references] : [];
+        out.push({
+          messageId: p.messageId || null,
+          inReplyTo: p.inReplyTo || null,
+          references,
+          from,
+          subject,
+          text: stripQuoted(bodyText),
+          rawText: bodyText.slice(0, 4000),
+          date: (p.date || new Date()).toISOString(),
+          kind: classifyInbound({ from, subject, text: stripQuoted(bodyText), autoSubmitted: p.headers && p.headers.get('auto-submitted') ? String(p.headers.get('auto-submitted')) : '' }),
+        });
+      }
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await client.logout().catch(() => {});
+  }
+  return out;
+}
+
+// Checks the two connections separately so the setup screen can say which one is wrong.
+async function verify() {
+  const result = {
+    smtp: { configured: smtpConfigured(), ok: false, error: null },
+    imap: { configured: imapConfigured(), ok: false, error: null },
+  };
+  if (result.smtp.configured) {
+    try {
+      transporter = null;
+      await getTransporter().verify();
+      result.smtp.ok = true;
+    } catch (e) {
+      result.smtp.error = friendlySmtpError(e);
+    }
+  }
+  if (result.imap.configured) {
+    try {
+      const { ImapFlow } = require('imapflow');
+      const s = imapSettings();
+      const client = new ImapFlow({ host: s.host, port: s.port, secure: s.port === 993, auth: { user: s.user, pass: s.pass }, logger: false });
+      client.on('error', () => {});
+      await client.connect();
+      await client.logout();
+      result.imap.ok = true;
+    } catch (e) {
+      result.imap.error = /AUTH|credentials|Invalid|LOGIN/i.test(e.message)
+        ? 'The mailbox rejected the login. For Gmail use an App Password and make sure IMAP is enabled in Gmail settings.'
+        : e.message;
+    }
+  }
+  return result;
+}
+
+function status() {
+  return {
+    smtp: { configured: smtpConfigured(), from: smtpConfigured() ? fromAddress() : null },
+    imap: { configured: imapConfigured(), host: imapConfigured() ? imapSettings().host : null },
+  };
+}
+
+module.exports = { send, fetchInbound, verify, status, smtpConfigured, imapConfigured, isEmail, stripQuoted, classifyInbound, bouncedRecipient, guessImapHost, fromAddress };

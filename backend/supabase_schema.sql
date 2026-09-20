@@ -477,3 +477,11 @@ begin
     );
   end loop;
 end $$;
+
+-- ---------------------------------------------------------------------------
+-- outreach — real sending, follow-up sequences and reply tracking keep their
+-- details (recipient, Message-ID, thread, follow-up schedule, reply summary)
+-- in one jsonb column. Safe to re-run.
+-- ---------------------------------------------------------------------------
+alter table messages add column if not exists meta jsonb not null default '{}'::jsonb;
+create index if not exists idx_messages_direction_status on messages (direction, status);

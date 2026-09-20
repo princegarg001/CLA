@@ -15,6 +15,8 @@ const gumroadFollowUp = require('./gumroadFollowUp');
 const referralFollowUp = require('./referralFollowUp');
 const clientCheckIn = require('./clientCheckIn');
 const dailyRecommendations = require('./dailyRecommendations');
+const outreachSync = require('./outreachSync');
+const outreachFollowups = require('./outreachFollowups');
 
 function wrap(name, job) {
   return async () => {
@@ -48,6 +50,8 @@ function start() {
     cron.schedule('0 */6 * * *', wrap('gumroadFollowUp', gumroadFollowUp)),  // every 6 hours — Workflow 4's 48h Gumroad auto-follow-up
     cron.schedule('0 9 * * *', wrap('referralFollowUp', referralFollowUp)),  // daily 9am — post-project thank-you/referral drafts
     cron.schedule('30 6 * * *', wrap('dailyRecommendations', dailyRecommendations), { timezone: config.defaultTimezone }), // 6:30am (DEFAULT_TIMEZONE) — today's ranked lead list
+    cron.schedule('*/10 * * * *', wrap('outreachSync', outreachSync)),              // every 10 min — replies, bounces, unsubscribes from the outreach mailbox
+    cron.schedule('15 * * * *', wrap('outreachFollowups', outreachFollowups)),      // hourly — follow-up drafts for leads who have not replied
     cron.schedule('0 9 1 * *', wrap('clientCheckIn', clientCheckIn)),        // 9am on the 1st of each month — check-in drafts
   ];
 

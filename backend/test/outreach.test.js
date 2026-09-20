@@ -417,3 +417,13 @@ test('a refused IMAP login shows the server\'s own words instead of "Command fai
   config.imapHost = '';
   config.smtpUser = 'me@alphotech.com';
 });
+
+test('a thread is as recent as its latest send, not when the draft was first saved', () => {
+  const msgs = [
+    { id: 'a', lead_id: 'L1', direction: 'outbound', status: 'sent', created_at: iso(NOW - 3 * 3600000), sent_at: iso(NOW), meta: {} },
+    { id: 'b', lead_id: 'L2', direction: 'outbound', status: 'sent', created_at: iso(NOW - 1000), sent_at: iso(NOW - 2 * DAY), meta: {} },
+  ];
+  const threads = outreach.buildThreads(msgs, [{ id: 'L1' }, { id: 'L2' }]);
+  assert.equal(threads[0].lead.id, 'L1');
+  assert.equal(threads[0].lastActivity, iso(NOW));
+});

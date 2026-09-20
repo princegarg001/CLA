@@ -175,7 +175,8 @@ function buildThreads(messages, leads) {
       key,
       lead: lead ? { id: lead.id, name: lead.name, company: lead.company, email: lead.email, status: lead.status, score: lead.score } : null,
       messages: list,
-      lastActivity: last.created_at,
+      // A message is "active" when it was sent or received, not when its draft was first saved.
+      lastActivity: list.map((m) => m.sent_at || m.created_at).filter(Boolean).sort().pop() || last.created_at,
       awaitingYou: !!lastInbound && (!lastOutbound || new Date(lastInbound.created_at) > new Date(lastOutbound.sent_at || 0)),
       hasDraft: list.some((m) => m.status === 'draft'),
     });

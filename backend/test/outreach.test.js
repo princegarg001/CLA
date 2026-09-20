@@ -404,3 +404,16 @@ test('Brevo is used when only its key is set, and verify() checks the key withou
     config.brevoApiKey = '';
   }
 });
+
+test('a refused IMAP login shows the server\'s own words instead of "Command failed"', () => {
+  config.imapHost = 'imap.titan.email';
+  config.smtpUser = 'support@alphotech.com';
+  const refused = Object.assign(new Error('Command failed'), { authenticationFailed: true, responseText: 'Authentication failed.' });
+  const msg = mailService.friendlyImapError(refused);
+  assert.match(msg, /support@alphotech\.com/);
+  assert.match(msg, /Authentication failed\./);
+  assert.match(msg, /app password|IMAP access is enabled/);
+  assert.match(mailService.friendlyImapError(Object.assign(new Error('connect ETIMEDOUT'), { code: 'ETIMEDOUT' })), /Could not connect to imap\.titan\.email:993/);
+  config.imapHost = '';
+  config.smtpUser = 'me@alphotech.com';
+});

@@ -209,7 +209,11 @@ async function fetchInbound({ since, limit = 200 } = {}) {
   const client = new ImapFlow({ host: s.host, port: s.port, secure: s.port === 993, auth: { user: s.user, pass: s.pass }, logger: false });
   client.on('error', (e) => logger.warn('mailService: imap error', { error: e.message }));
   const out = [];
-  await client.connect();
+  try {
+    await client.connect();
+  } catch (e) {
+    throw Object.assign(new Error(friendlyImapError(e)), { status: 502 });
+  }
   try {
     const lock = await client.getMailboxLock('INBOX');
     try {
@@ -241,6 +245,20 @@ async function fetchInbound({ since, limit = 200 } = {}) {
     await client.logout().catch(() => {});
   }
   return out;
+}
+
+// imapflow reports a refused login as just "Command failed"; the server's own words are in
+// responseText, and those are what say whether it is the password, a disabled IMAP setting, etc.
+function friendlyImapError(e) {
+  const server = [e.responseText, e.serverResponseCode].filter(Boolean).join(' ').trim();
+  const s = imapSettings();
+  if (e.authenticationFailed || /AUTH|credentials|Invalid|LOGIN|password/i.test(`${server} ${e.message}`)) {
+    return `The mailbox rejected the login for ${s.user}${server ? ` ("${server}")` : ''}. Check that SMTP_PASS is this mailbox's password (an app password if two-factor is on) and that IMAP access is enabled for the mailbox.`;
+  }
+  if (/^(ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ECONNRESET|EDNS)$/.test(e.code || '') || /timeout|ENOTFOUND|ECONNREFUSED/i.test(e.message)) {
+    return `Could not connect to ${s.host}:${s.port}. Check IMAP_HOST and IMAP_PORT.`;
+  }
+  return `${e.message}${server ? ` (${server})` : ''}`;
 }
 
 // Checks the two connections separately so the setup screen can say which one is wrong.
@@ -282,9 +300,7 @@ async function verify() {
       await client.logout();
       result.imap.ok = true;
     } catch (e) {
-      result.imap.error = /AUTH|credentials|Invalid|LOGIN/i.test(e.message)
-        ? 'The mailbox rejected the login. For Gmail use an App Password and make sure IMAP is enabled in Gmail settings.'
-        : e.message;
+      result.imap.error = friendlyImapError(e);
     }
   }
   return result;
@@ -297,4 +313,4 @@ function status() {
   };
 }
 
-module.exports = { friendlySmtpError, apiProvider, canSend, send, fetchInbound, verify, status, smtpConfigured, imapConfigured, isEmail, stripQuoted, classifyInbound, bouncedRecipient, guessImapHost, fromAddress };
+module.exports = { friendlyImapError, friendlySmtpError, apiProvider, canSend, send, fetchInbound, verify, status, smtpConfigured, imapConfigured, isEmail, stripQuoted, classifyInbound, bouncedRecipient, guessImapHost, fromAddress };

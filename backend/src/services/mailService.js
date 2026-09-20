@@ -36,11 +36,51 @@ function canSend() {
 
 function imapSettings() {
   return {
-    host: config.imapHost || guessImapHost(config.smtpHost),
+    host: workingImapHost || imapHosts()[0] || '',
     port: config.imapPort || 993,
     user: config.imapUser || config.smtpUser,
     pass: config.imapPass || config.smtpPass,
   };
+}
+
+// IMAP_HOST may list several servers separated by commas. GoDaddy mailboxes live on either Titan
+// (imap.titan.email) or GoDaddy's own servers (imap.secureserver.net) and nothing in the mailbox
+// says which, so both are tried and the one that accepts the login is remembered.
+function imapHosts() {
+  const listed = (config.imapHost || '').split(',').map((h) => h.trim()).filter(Boolean);
+  if (listed.length) return listed;
+  const guess = guessImapHost(config.smtpHost);
+  const godaddy = /secureserver\.net|titan\.email/i.test(config.smtpHost || '');
+  return [...new Set([guess, ...(godaddy ? ['imap.titan.email', 'imap.secureserver.net'] : [])].filter(Boolean))];
+}
+
+let workingImapHost = null;
+
+// Connects to the first server that accepts the login. Only a refused login moves on to the next
+// candidate; the error returned when all fail names every server that was tried.
+async function openImap() {
+  const { ImapFlow } = require('imapflow');
+  const s = imapSettings();
+  // The last server that worked goes first, but the others stay as fallbacks in case it changed.
+  const hosts = workingImapHost ? [workingImapHost, ...imapHosts().filter((h) => h !== workingImapHost)] : imapHosts();
+  const tried = [];
+  let lastErr = null;
+  for (const host of hosts) {
+    const client = new ImapFlow({ host, port: s.port, secure: s.port === 993, auth: { user: s.user, pass: s.pass }, logger: false });
+    client.on('error', (e) => logger.warn('mailService: imap error', { host, error: e.message }));
+    try {
+      await client.connect();
+      workingImapHost = host;
+      return { client, host };
+    } catch (e) {
+      tried.push(host);
+      e.imapHost = host;
+      e.imapTried = tried.slice();
+      lastErr = e;
+      workingImapHost = null;
+    }
+  }
+  throw lastErr || new Error('No IMAP server is configured');
 }
 
 function imapConfigured() {
@@ -203,14 +243,11 @@ const addrOf = (v) => {
 
 async function fetchInbound({ since, limit = 200 } = {}) {
   if (!imapConfigured()) return [];
-  const { ImapFlow } = require('imapflow');
   const { simpleParser } = require('mailparser');
-  const s = imapSettings();
-  const client = new ImapFlow({ host: s.host, port: s.port, secure: s.port === 993, auth: { user: s.user, pass: s.pass }, logger: false });
-  client.on('error', (e) => logger.warn('mailService: imap error', { error: e.message }));
   const out = [];
+  let client;
   try {
-    await client.connect();
+    ({ client } = await openImap());
   } catch (e) {
     throw Object.assign(new Error(friendlyImapError(e)), { status: 502 });
   }
@@ -251,9 +288,10 @@ async function fetchInbound({ since, limit = 200 } = {}) {
 // responseText, and those are what say whether it is the password, a disabled IMAP setting, etc.
 function friendlyImapError(e) {
   const server = [e.responseText, e.serverResponseCode].filter(Boolean).join(' ').trim();
-  const s = imapSettings();
+  const s = { ...imapSettings(), host: e.imapHost || imapSettings().host };
+  const tried = e.imapTried && e.imapTried.length > 1 ? ` Tried ${e.imapTried.join(' and ')}.` : '';
   if (e.authenticationFailed || /AUTH|credentials|Invalid|LOGIN|password/i.test(`${server} ${e.message}`)) {
-    return `The mailbox rejected the login for ${s.user}${server ? ` ("${server}")` : ''}. Check that SMTP_PASS is this mailbox's password (an app password if two-factor is on) and that IMAP access is enabled for the mailbox.`;
+    return `The mailbox rejected the login for ${s.user}${server ? ` ("${server}")` : ''}. Check that SMTP_PASS is this mailbox's password (an app password if two-factor is on) and that IMAP access is enabled for the mailbox.${tried}`;
   }
   if (/^(ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ECONNRESET|EDNS)$/.test(e.code || '') || /timeout|ENOTFOUND|ECONNREFUSED/i.test(e.message)) {
     return `Could not connect to ${s.host}:${s.port}. Check IMAP_HOST and IMAP_PORT.`;
@@ -292,13 +330,10 @@ async function verify() {
   }
   if (result.imap.configured) {
     try {
-      const { ImapFlow } = require('imapflow');
-      const s = imapSettings();
-      const client = new ImapFlow({ host: s.host, port: s.port, secure: s.port === 993, auth: { user: s.user, pass: s.pass }, logger: false });
-      client.on('error', () => {});
-      await client.connect();
-      await client.logout();
+      const { client, host } = await openImap();
+      await client.logout().catch(() => {});
       result.imap.ok = true;
+      result.imap.host = host;
     } catch (e) {
       result.imap.error = friendlyImapError(e);
     }
@@ -313,4 +348,4 @@ function status() {
   };
 }
 
-module.exports = { friendlyImapError, friendlySmtpError, apiProvider, canSend, send, fetchInbound, verify, status, smtpConfigured, imapConfigured, isEmail, stripQuoted, classifyInbound, bouncedRecipient, guessImapHost, fromAddress };
+module.exports = { imapHosts, friendlyImapError, friendlySmtpError, apiProvider, canSend, send, fetchInbound, verify, status, smtpConfigured, imapConfigured, isEmail, stripQuoted, classifyInbound, bouncedRecipient, guessImapHost, fromAddress };

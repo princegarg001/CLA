@@ -427,3 +427,50 @@ test('a thread is as recent as its latest send, not when the draft was first sav
   assert.equal(threads[0].lead.id, 'L1');
   assert.equal(threads[0].lastActivity, iso(NOW));
 });
+
+test('IMAP tries every likely GoDaddy server, remembers the one that works, and names them all when none do', async () => {
+  const saved = { imapHost: config.imapHost, smtpHost: config.smtpHost, smtpUser: config.smtpUser, smtpPass: config.smtpPass };
+  Object.assign(config, { imapHost: '', smtpHost: 'smtpout.secureserver.net', smtpUser: 'support@alphotech.com', smtpPass: 'pw' });
+  assert.deepEqual(mailService.imapHosts(), ['imap.secureserver.net', 'imap.titan.email']);
+  config.imapHost = 'imap.titan.email, imap.secureserver.net';
+  assert.deepEqual(mailService.imapHosts(), ['imap.titan.email', 'imap.secureserver.net']);
+
+  require('imapflow'); // load it so its module entry can be swapped for a fake
+  const entry = require.cache[require.resolve('imapflow')];
+  const Real = entry.exports.ImapFlow;
+  const attempts = [];
+  let accept = 'imap.secureserver.net';
+  config.resendApiKey = 're_test'; // keeps verify() off the real SMTP network
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({}) });
+  entry.exports.ImapFlow = class {
+    constructor(o) {
+      this.host = o.host;
+    }
+    on() {}
+    async connect() {
+      attempts.push(this.host);
+      if (this.host !== accept) throw Object.assign(new Error('Command failed'), { authenticationFailed: true, responseText: 'AUTHENTICATIONFAILED' });
+    }
+    async logout() {}
+  };
+  try {
+    const ok = await mailService.verify();
+    assert.equal(ok.imap.ok, true);
+    assert.equal(ok.imap.host, 'imap.secureserver.net');
+    assert.deepEqual(attempts, ['imap.titan.email', 'imap.secureserver.net']);
+    attempts.length = 0;
+    await mailService.verify();
+    assert.deepEqual(attempts, ['imap.secureserver.net'], 'the working server is tried first next time');
+
+    accept = 'nowhere';
+    const bad = await mailService.verify();
+    assert.equal(bad.imap.ok, false);
+    assert.match(bad.imap.error, /Tried imap\.secureserver\.net/);
+  } finally {
+    entry.exports.ImapFlow = Real;
+    globalThis.fetch = realFetch;
+    config.resendApiKey = '';
+    Object.assign(config, saved);
+  }
+});

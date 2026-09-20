@@ -9,6 +9,7 @@ import { FreelanceRadarPage } from './features/freelance-radar/FreelanceRadarPag
 import { ClientVaultPage } from './features/client-vault/ClientVaultPage';
 import { ClientDetailPage } from './features/client-vault/ClientDetailPage';
 import { GrowthStudioPage } from './features/growth-studio/GrowthStudioPage';
+import { DailyLeadsPage } from './features/daily-leads/DailyLeadsPage';
 import { AiAgentLabPage } from './features/ai-agent-lab/AiAgentLabPage';
 import { RevenueCommandPage } from './features/revenue-command/RevenueCommandPage';
 import { AnalyticsTowerPage } from './features/analytics-tower/AnalyticsTowerPage';
@@ -34,6 +35,7 @@ export default function App() {
             <Routes>
               <Route element={<AppShell />}>
                 <Route index element={<WarRoomPage />} />
+                <Route path="daily" element={<DailyLeadsPage />} />
                 <Route path="apollo" element={<ApolloHunterPage />} />
                 <Route path="freelance" element={<FreelanceRadarPage />} />
                 <Route path="clients" element={<ClientVaultPage />} />

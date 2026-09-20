@@ -66,6 +66,33 @@ async function upload<T>(path: string, field: string, file: File): Promise<T> {
   return json.data as T;
 }
 
+// Same as upload(), but reports progress (0..1) — fetch has no upload progress
+// events, which a 40MB video needs.
+function uploadWithProgress<T>(path: string, field: string, file: File, onProgress?: (fraction: number) => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${config.apiBaseUrl}${path}`);
+    if (config.apiKey) xhr.setRequestHeader('X-API-Key', config.apiKey);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      let json: { ok: boolean; data?: T; error?: string } | null = null;
+      try {
+        json = JSON.parse(xhr.responseText);
+      } catch {
+        /* non-JSON error page */
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && json?.ok) resolve(json.data as T);
+      else reject(new ApiError(xhr.status, json?.error || `Upload failed (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new ApiError(0, 'Network error during upload — check your connection and try again'));
+    const form = new FormData();
+    form.append(field, file);
+    xhr.send(form);
+  });
+}
+
 export const api = {
   get: <T>(path: string, query?: Query) => request<T>('GET', path, { query }),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, { body }),
@@ -73,4 +100,5 @@ export const api = {
   put: <T>(path: string, body?: unknown) => request<T>('PUT', path, { body }),
   del: <T>(path: string) => request<T>('DELETE', path),
   upload,
+  uploadWithProgress,
 };

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import {
   Radio,
+  Target,
   Rocket,
   RadarIcon,
   Briefcase,
@@ -19,6 +20,7 @@ import { useAuth } from '../auth/AuthContext';
 
 const NAV = [
   { to: '/', label: 'War Room', icon: Radio, end: true },
+  { to: '/daily', label: 'Daily Leads', icon: Target },
   { to: '/apollo', label: 'Apollo Hunter', icon: Rocket },
   { to: '/freelance', label: 'Freelance Radar', icon: RadarIcon },
   { to: '/clients', label: 'Client Vault', icon: Briefcase },

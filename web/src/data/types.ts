@@ -204,17 +204,43 @@ export interface Client {
 
 // ---- Growth Studio ------------------------------------------------------------
 
+export type SocialPlatform = 'twitter' | 'linkedin' | 'reddit';
+
+export interface MediaItem {
+  url: string;
+  type: 'image' | 'gif' | 'video';
+  mime?: string;
+  size?: number;
+  name?: string;
+  path?: string;
+}
+
+export interface PlatformVariant {
+  text?: string;
+  title?: string;
+  subreddit?: string;
+  kind?: 'self' | 'link' | 'image';
+  linkUrl?: string;
+  flairId?: string;
+}
+
+export type Variants = Partial<Record<string, PlatformVariant>>;
+
 export interface PublishResult {
   platform: string;
   status: 'success' | 'skipped' | 'failed';
   externalPostId?: string | null;
+  url?: string | null;
   error?: string | null;
   reason?: string | null;
+  retriable?: boolean;
 }
 
 export function publishSucceeded(r: PublishResult): boolean {
   return r.status === 'success';
 }
+
+export type CalendarStatus = 'draft' | 'scheduled' | 'publishing' | 'posted' | 'partial' | 'failed' | 'cancelled';
 
 export interface CalendarEntry {
   id: string;
@@ -224,9 +250,50 @@ export interface CalendarEntry {
   post_type: string;
   scheduled_for: string;
   timezone: string;
-  status: 'draft' | 'scheduled' | 'posted' | 'failed' | 'cancelled';
+  status: CalendarStatus;
   ai_generated: boolean;
   results: PublishResult[];
+  raw?: {
+    media?: MediaItem[];
+    variants?: Variants;
+    attempts?: number;
+    next_attempt_at?: string | null;
+  };
+}
+
+export interface ValidationIssue {
+  platform: string | null;
+  field: string;
+  message: string;
+}
+
+export interface PlatformValidation {
+  errors: { field: string; message: string }[];
+  warnings: { field: string; message: string }[];
+  text: { length: number; limit: number } | null;
+}
+
+export interface ValidationResult {
+  ok: boolean;
+  errors: ValidationIssue[];
+  warnings: ValidationIssue[];
+  platforms: Record<string, PlatformValidation>;
+}
+
+export interface SocialLimits {
+  limits: Record<string, Record<string, unknown>>;
+  uploadMaxBytes: number;
+  mediaTypes: Record<string, 'image' | 'gif' | 'video'>;
+}
+
+export interface SubredditInfo {
+  sample?: boolean;
+  name: string;
+  subscribers: number | null;
+  submissionType: string;
+  over18: boolean;
+  rules: { name: string; description: string }[];
+  flairs: { id: string; text: string }[];
 }
 
 export interface TwitterAnalytics {

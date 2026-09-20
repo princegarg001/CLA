@@ -1,218 +1,30 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   TrendingUp,
   RefreshCw,
   Send,
   Sparkles,
-  Image as ImageIcon,
-  X,
-  AtSign,
-  Briefcase,
-  ThumbsUp,
   Eye,
   Heart,
   Download,
   ShoppingCart,
   Rocket,
-  CalendarClock,
-  Check,
   Trash2,
   ArrowUpRight,
   MessageSquare,
+  AlertTriangle,
 } from 'lucide-react';
-import { usePublish, useUploadImage, useGumroadStats, useTwitterAnalytics, useTwitterScheduled, useGenerateThread, useBetalistSignups } from '../../data/hooks/useGrowth';
+import { useGumroadStats, useTwitterAnalytics, useGenerateThread, useBetalistSignups } from '../../data/hooks/useGrowth';
 import { useSocialStatus } from '../../data/hooks/useSettings';
-import { useCalendarEntries, useApproveCalendarEntry, usePublishCalendarEntryNow, useCancelCalendarEntry, useFillWeek } from '../../data/hooks/useCalendar';
+import { useCalendarEntries } from '../../data/hooks/useCalendar';
+import { useDeleteMedia, useMediaLibrary } from '../../data/hooks/useStudio';
 import { useRedditOpportunities, useRedditKarma, useDraftRedditReply, useSendRedditReply } from '../../data/hooks/useReddit';
 import { Card, TabBar, IconButton, StatCard, Badge, AccentButton, LoadingState, EmptyState, InitialsAvatar } from '../../components/ui';
+import { Composer, type ComposerSeed } from './Composer';
+import { CalendarView } from './CalendarView';
+import { MediaThumb, fmtBytes } from './MediaUploader';
 import { leadDisplayName, type RedditPost } from '../../data/types';
-
-const PLATFORM_DOT: Record<string, string> = { twitter: '#1DA1F2', linkedin: '#0077B5', facebook: '#1877F2', reddit: '#FF4500' };
-
-function AutoPostTab() {
-  const { data: status } = useSocialStatus();
-  const publish = usePublish();
-  const uploadImage = useUploadImage();
-  const [text, setText] = useState('');
-  const [platforms, setPlatforms] = useState<Set<string>>(new Set(['twitter']));
-  const [file, setFile] = useState<File | null>(null);
-  const [results, setResults] = useState<{ platform: string; status: string; message: string }[]>([]);
-
-  const togglePlatform = (key: string, connected: boolean) => {
-    if (!connected) return;
-    setPlatforms((p) => {
-      const next = new Set(p);
-      next.has(key) ? next.delete(key) : next.add(key);
-      return next;
-    });
-  };
-
-  async function handlePublish() {
-    if (platforms.size === 0 || !text.trim()) return;
-    let imageUrl: string | undefined;
-    if (file) {
-      const r = await uploadImage.mutateAsync(file);
-      imageUrl = r.url;
-    }
-    const r = await publish.mutateAsync({ text: text.trim(), imageUrl, platforms: [...platforms] });
-    setResults(
-      r.results.map((res) => ({
-        platform: res.platform,
-        status: res.status,
-        message: res.status === 'success' ? 'Published' : res.error || res.reason || 'Failed',
-      }))
-    );
-  }
-
-  const chips: { key: string; label: string; icon: typeof AtSign; connected: boolean }[] = [
-    { key: 'twitter', label: 'Twitter/X', icon: AtSign, connected: !!status?.twitter?.connected },
-    { key: 'linkedin', label: 'LinkedIn', icon: Briefcase, connected: !!status?.linkedin?.connected },
-    { key: 'facebook', label: 'Facebook Page', icon: ThumbsUp, connected: !!status?.facebook?.connected },
-  ];
-
-  return (
-    <div className="space-y-4">
-      <Card className="p-5">
-        <p className="text-[15px] font-bold">Publish Everywhere</p>
-        <p className="text-xs text-text-faint mt-0.5 mb-3.5">One post, every platform you connect below.</p>
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={5}
-          placeholder="What do you want to announce?"
-          className="w-full rounded-xl bg-bg-soft border border-border-soft p-3.5 text-sm outline-none focus:border-amber resize-none"
-        />
-        <div className="flex items-center gap-2 mt-2.5">
-          <label className="inline-flex items-center gap-1.5 text-xs font-medium border border-border-soft rounded-lg px-3 py-1.5 cursor-pointer text-text-muted">
-            <ImageIcon size={14} /> {file ? 'Change image' : 'Add image'}
-            <input type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-          </label>
-          {file && (
-            <>
-              <span className="text-xs text-text-faint truncate max-w-[140px]">{file.name}</span>
-              <button onClick={() => setFile(null)}>
-                <X size={14} className="text-text-faint" />
-              </button>
-            </>
-          )}
-        </div>
-        <p className="text-xs font-semibold text-text-muted mt-4 mb-2">Publish to</p>
-        <div className="flex flex-wrap gap-2">
-          {chips.map((c) => {
-            const selected = platforms.has(c.key);
-            return (
-              <button
-                key={c.key}
-                onClick={() => togglePlatform(c.key, c.connected)}
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold border ${
-                  !c.connected
-                    ? 'border-border-soft text-text-faint'
-                    : selected
-                      ? 'border-amber bg-amber/12 text-amber'
-                      : 'border-border-soft text-text-muted'
-                }`}
-              >
-                <c.icon size={13} />
-                {c.label}
-                {!c.connected && <span className="text-[10px]">· connect in Settings</span>}
-              </button>
-            );
-          })}
-        </div>
-        <div className="mt-4">
-          <AccentButton label="Publish Now" icon={Send} loading={publish.isPending || uploadImage.isPending} onClick={handlePublish} />
-        </div>
-      </Card>
-      {results.length > 0 && (
-        <div>
-          <p className="text-[15px] font-bold mb-2">Last publish result</p>
-          <div className="space-y-2">
-            {results.map((r, i) => (
-              <Card key={i} className="p-3 flex items-center gap-3">
-                {r.status === 'success' ? <Check size={18} className="text-success" /> : <X size={18} className="text-critical" />}
-                <div>
-                  <p className="text-sm font-semibold">{r.platform[0].toUpperCase() + r.platform.slice(1)}</p>
-                  <p className="text-xs text-text-faint">{r.message}</p>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CalendarTab() {
-  const { data: entries, isLoading } = useCalendarEntries();
-  const approve = useApproveCalendarEntry();
-  const publishNow = usePublishCalendarEntryNow();
-  const cancel = useCancelCalendarEntry();
-  const fillWeek = useFillWeek();
-
-  const statusTone = (s: string): 'success' | 'critical' | 'warning' | 'muted' | 'info' =>
-    s === 'posted' ? 'success' : s === 'failed' ? 'critical' : s === 'draft' ? 'warning' : s === 'cancelled' ? 'muted' : 'info';
-
-  return (
-    <div className="space-y-4">
-      <AccentButton
-        label={fillWeek.isPending ? 'Filling…' : 'Fill Week with AI'}
-        icon={Sparkles}
-        loading={fillWeek.isPending}
-        onClick={() => fillWeek.mutate()}
-      />
-      {!entries?.length && isLoading ? (
-        <LoadingState />
-      ) : !entries?.length ? (
-        <EmptyState text="Nothing on the calendar yet." />
-      ) : (
-        <div className="space-y-3">
-          {entries.map((e) => (
-            <Card key={e.id} className="p-4">
-              <div className="flex items-center gap-2">
-                <div className="flex gap-1">
-                  {e.platforms.map((p) => (
-                    <span key={p} className="h-2 w-2 rounded-full" style={{ background: PLATFORM_DOT[p] || '#71828C' }} />
-                  ))}
-                </div>
-                <p className="text-xs text-text-faint flex-1">
-                  {new Date(e.scheduled_for).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                </p>
-                {e.ai_generated && <Sparkles size={13} className="text-amber" />}
-                <Badge tone={statusTone(e.status)}>{e.status}</Badge>
-              </div>
-              <p className="text-sm mt-2 line-clamp-3">{e.content || '(no text — media only)'}</p>
-              {e.results.length > 0 && (
-                <div className="mt-2 space-y-0.5">
-                  {e.results.map((r, i) => (
-                    <p key={i} className="text-[11px] text-text-faint">
-                      {r.platform}: {r.status === 'success' ? 'Published' : r.error || r.reason || r.status}
-                    </p>
-                  ))}
-                </div>
-              )}
-              {['draft', 'scheduled', 'failed'].includes(e.status) && (
-                <div className="flex gap-2 mt-3">
-                  {e.status === 'draft' && (
-                    <button onClick={() => approve.mutate(e.id)} className="flex-1 rounded-lg border border-border-soft py-1.5 text-xs font-medium flex items-center justify-center gap-1">
-                      <Check size={12} /> Approve
-                    </button>
-                  )}
-                  <button onClick={() => publishNow.mutate(e.id)} className="flex-1 rounded-lg border border-border-soft py-1.5 text-xs font-medium flex items-center justify-center gap-1">
-                    <Send size={12} /> Publish Now
-                  </button>
-                  <button onClick={() => cancel.mutate(e.id)} className="flex-1 rounded-lg border border-critical/40 text-critical py-1.5 text-xs font-medium flex items-center justify-center gap-1">
-                    <Trash2 size={12} /> Cancel
-                  </button>
-                </div>
-              )}
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function RedditReplyBox({ post }: { post: RedditPost }) {
   const draftReply = useDraftRedditReply();
@@ -300,9 +112,8 @@ function RedditTab() {
   );
 }
 
-function TwitterTab() {
+function TwitterTab({ onUseThread }: { onUseThread: (tweets: string[]) => void }) {
   const { data: analytics } = useTwitterAnalytics();
-  const { data: scheduled } = useTwitterScheduled();
   const generateThread = useGenerateThread();
   const [topic, setTopic] = useState('');
   const [thread, setThread] = useState<string[] | null>(null);
@@ -311,24 +122,6 @@ function TwitterTab() {
 
   return (
     <div className="space-y-4">
-      <p className="text-[15px] font-bold">Scheduled Posts</p>
-      {!scheduled?.length ? (
-        <EmptyState text="Nothing scheduled yet." />
-      ) : (
-        <div className="space-y-2">
-          {scheduled.map((p) => (
-            <Card key={p.id} className="p-3.5">
-              <div className="flex items-center gap-2">
-                <CalendarClock size={15} className={p.status === 'scheduled' ? 'text-success' : 'text-warning'} />
-                <p className="text-xs text-text-faint flex-1">{p.scheduled_for ? new Date(p.scheduled_for).toLocaleString() : ''}</p>
-                <Badge tone={p.status === 'scheduled' ? 'success' : 'warning'}>{p.status}</Badge>
-              </div>
-              <p className="text-sm mt-2 line-clamp-2">{p.content}</p>
-            </Card>
-          ))}
-        </div>
-      )}
-
       <Card className="p-5">
         <p className="text-[15px] font-bold">Generate a Thread</p>
         <p className="text-xs text-text-faint mt-0.5 mb-3">AI writes a full thread in your voice</p>
@@ -357,6 +150,12 @@ function TwitterTab() {
                 {t}
               </div>
             ))}
+            <button
+              onClick={() => onUseThread(thread)}
+              className="w-full rounded-lg border border-amber/50 text-amber py-2 text-xs font-semibold hover:bg-amber/10"
+            >
+              Edit and schedule this thread in the composer
+            </button>
           </div>
         )}
       </Card>
@@ -452,12 +251,57 @@ function BetaListTab() {
   );
 }
 
+function LibraryTab() {
+  const { data, isLoading } = useMediaLibrary();
+  const del = useDeleteMedia();
+  if (isLoading) return <LoadingState />;
+  if (!data?.length) return <EmptyState text="Nothing uploaded yet. Add images or video in the composer." />;
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+      {data.map((m) => (
+        <Card key={m.path || m.url} className="overflow-hidden group relative">
+          <MediaThumb item={m} className="h-32 w-full" />
+          <div className="p-2.5">
+            <p className="text-xs truncate">{m.name}</p>
+            <p className="text-[10px] text-text-faint">
+              {m.type} · {fmtBytes(m.size)}
+            </p>
+          </div>
+          <button
+            onClick={() => m.path && window.confirm(`Delete ${m.name}? Scheduled posts using it will fail.`) && del.mutate(m.path)}
+            className="absolute top-2 right-2 hidden group-hover:flex h-7 w-7 items-center justify-center rounded-lg bg-black/60 text-white hover:bg-critical"
+            title="Delete permanently"
+          >
+            <Trash2 size={13} />
+          </button>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+const TABS = ['Compose', 'Calendar', 'Reddit', 'Twitter/X', 'Library', 'Gumroad', 'BetaList'];
+
 export function GrowthStudioPage() {
   const [tab, setTab] = useState(0);
-  const { data: twitterAnalytics } = useTwitterAnalytics();
-  const { data: gumroadStats } = useGumroadStats();
+  const [seed, setSeed] = useState<ComposerSeed | undefined>(undefined);
+  const [composerKey, setComposerKey] = useState(0);
+  const { data: status } = useSocialStatus();
   const { data: calendarEntries } = useCalendarEntries();
   const { data: betalist } = useBetalistSignups();
+
+  function compose(next?: ComposerSeed) {
+    setSeed(next);
+    setComposerKey((k) => k + 1);
+    setTab(0);
+  }
+
+  const entries = calendarEntries || [];
+  const upcoming = entries.filter((e) => e.status === 'scheduled').length;
+  const drafts = entries.filter((e) => e.status === 'draft').length;
+  const needsAttention = entries.filter((e) => e.status === 'failed' || e.status === 'partial').length;
+  const linkedinDays = status?.linkedin.daysLeft;
+  const linkedinWarn = !!status?.linkedin.connected && (!!status.linkedin.expired || (linkedinDays != null && linkedinDays <= 7));
 
   return (
     <div className="space-y-6">
@@ -466,33 +310,48 @@ export function GrowthStudioPage() {
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <TrendingUp size={22} className="text-amber" /> Growth Studio
           </h1>
-          <p className="text-sm text-text-muted mt-1">Publish, schedule, and track every growth channel from one place.</p>
+          <p className="text-sm text-text-muted mt-1">Write once, tailor per platform, schedule it, and track what lands.</p>
         </div>
         <IconButton icon={RefreshCw} onClick={() => window.location.reload()} />
       </div>
 
+      {linkedinWarn && (
+        <div className="rounded-xl border border-warning/40 bg-warning-bg px-4 py-3 text-xs flex items-center gap-2.5">
+          <AlertTriangle size={15} className="text-warning shrink-0" />
+          <p>
+            {status?.linkedin.expired
+              ? 'Your LinkedIn connection has expired. Scheduled LinkedIn posts will fail until you reconnect.'
+              : `Your LinkedIn connection expires in ${linkedinDays} day${linkedinDays === 1 ? '' : 's'}. Reconnect before then so scheduled posts keep going out.`}{' '}
+            <Link to="/settings" className="text-amber font-semibold hover:underline">
+              Reconnect in Settings
+            </Link>
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-4 gap-3">
         {[
-          ['Followers', twitterAnalytics?.followers ?? 0],
-          ['Downloads', gumroadStats?.totalDownloads ?? 0],
-          ['Scheduled', calendarEntries?.length ?? 0],
+          ['Scheduled', upcoming],
+          ['Drafts', drafts],
+          ['Need attention', needsAttention],
           ['Signups', betalist?.length ?? 0],
         ].map(([label, value]) => (
           <div key={label as string} className="text-center">
-            <p className="font-mono-tab text-xl font-bold text-amber">{value as number}</p>
+            <p className={`font-mono-tab text-xl font-bold ${label === 'Need attention' && (value as number) > 0 ? 'text-critical' : 'text-amber'}`}>{value as number}</p>
             <p className="text-[11px] text-text-faint">{label as string}</p>
           </div>
         ))}
       </div>
 
-      <TabBar tabs={['Auto-Post', 'Calendar', 'Reddit', 'Twitter/X', 'Gumroad', 'BetaList']} active={tab} onChange={setTab} />
+      <TabBar tabs={TABS} active={tab} onChange={setTab} />
 
-      {tab === 0 && <AutoPostTab />}
-      {tab === 1 && <CalendarTab />}
+      {tab === 0 && <Composer key={composerKey} seed={seed} />}
+      {tab === 1 && <CalendarView onCompose={(d) => compose(d ? { when: d } : undefined)} />}
       {tab === 2 && <RedditTab />}
-      {tab === 3 && <TwitterTab />}
-      {tab === 4 && <GumroadTab />}
-      {tab === 5 && <BetaListTab />}
+      {tab === 3 && <TwitterTab onUseThread={(tweets) => compose({ content: tweets.join('\n\n'), platforms: ['twitter'], postType: 'thread' })} />}
+      {tab === 4 && <LibraryTab />}
+      {tab === 5 && <GumroadTab />}
+      {tab === 6 && <BetaListTab />}
     </div>
   );
 }

@@ -81,35 +81,74 @@ function ConnectedAccounts() {
 
   if (isLoading) return <LoadingState />;
 
-  const rows: { platform: 'linkedin' | 'facebook'; label: string; color: string; connected: boolean }[] = [
-    { platform: 'linkedin', label: 'LinkedIn', color: '#0077B5', connected: !!status?.linkedin?.connected },
-    { platform: 'facebook', label: 'Facebook Page', color: '#1877F2', connected: !!status?.facebook?.connected },
+  const li = status?.linkedin;
+  const liWarn = !!li?.connected && (!!li.expired || (li.daysLeft != null && li.daysLeft <= 7));
+  const liDetail = !li?.connected
+    ? 'Not connected'
+    : li.expired
+      ? 'Connection expired. Reconnect to keep posting'
+      : `Connected${li.accountName ? ` as ${li.accountName}` : ''}${li.daysLeft != null ? ` · ${li.daysLeft} days left` : ''}`;
+
+  const envRows: { label: string; color: string; ok: boolean; detail: string }[] = [
+    {
+      label: 'X / Twitter',
+      color: '#1DA1F2',
+      ok: !!status?.twitter?.connected,
+      detail: status?.twitter?.connected
+        ? 'Keys configured. Posting text, images and video'
+        : 'Set TWITTER_API_KEY / SECRET / ACCESS_TOKEN / ACCESS_SECRET on the backend',
+    },
+    {
+      label: 'Reddit',
+      color: '#FF4500',
+      ok: !!status?.reddit?.connected,
+      detail: status?.reddit?.connected
+        ? `Script app configured${status.reddit.accountName ? ` as u/${status.reddit.accountName}` : ''}`
+        : 'Set REDDIT_CLIENT_ID / SECRET / USERNAME / PASSWORD on the backend',
+    },
   ];
 
   return (
     <Card className="p-5">
       <SectionHeader title="Connected Accounts" />
       <div className="space-y-2">
-        {rows.map((r) => (
-          <div key={r.platform} className="flex items-center justify-between py-2 border-b border-border-soft last:border-0">
-            <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-lg flex items-center justify-center font-bold text-xs" style={{ background: `${r.color}22`, color: r.color }}>
+        <div className="flex items-center justify-between py-2 border-b border-border-soft">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-lg flex items-center justify-center font-bold text-xs" style={{ background: '#0A66C222', color: '#0A66C2' }}>
+              L
+            </div>
+            <div>
+              <p className="text-sm font-medium">LinkedIn</p>
+              <p className={`text-xs ${liWarn ? 'text-warning' : 'text-text-faint'}`}>{liDetail}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {liWarn && (
+              <button onClick={() => connect.mutate('linkedin')} className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber/15 text-amber">
+                <Link2 size={12} /> Reconnect
+              </button>
+            )}
+            <button
+              onClick={() => (li?.connected ? disconnect.mutate('linkedin') : connect.mutate('linkedin'))}
+              className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg ${li?.connected ? 'bg-critical-bg text-critical' : 'bg-amber/15 text-amber'}`}
+            >
+              {li?.connected ? <Unlink size={12} /> : <Link2 size={12} />}
+              {li?.connected ? 'Disconnect' : 'Connect'}
+            </button>
+          </div>
+        </div>
+        {envRows.map((r) => (
+          <div key={r.label} className="flex items-center justify-between py-2 border-b border-border-soft last:border-0 gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-9 w-9 shrink-0 rounded-lg flex items-center justify-center font-bold text-xs" style={{ background: `${r.color}22`, color: r.color }}>
                 {r.label[0]}
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm font-medium">{r.label}</p>
-                <p className="text-xs text-text-faint">{r.connected ? 'Connected' : 'Not connected'}</p>
+                <p className="text-xs text-text-faint">{r.detail}</p>
               </div>
             </div>
-            <button
-              onClick={() => (r.connected ? disconnect.mutate(r.platform) : connect.mutate(r.platform))}
-              className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg ${
-                r.connected ? 'bg-critical-bg text-critical' : 'bg-amber/15 text-amber'
-              }`}
-            >
-              {r.connected ? <Unlink size={12} /> : <Link2 size={12} />}
-              {r.connected ? 'Disconnect' : 'Connect'}
-            </button>
+            <Badge tone={r.ok ? 'success' : 'muted'}>{r.ok ? 'Ready' : 'Not set up'}</Badge>
           </div>
         ))}
       </div>

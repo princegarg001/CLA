@@ -13,12 +13,17 @@ export function useIntegrations() {
 export interface SocialPlatformStatus {
   connected: boolean;
   appConfigured?: boolean;
+  accountName?: string | null;
+  expiresAt?: string | null;
+  daysLeft?: number | null;
+  expired?: boolean;
+  monitoredSubs?: string[];
 }
 
 export interface SocialStatus {
   linkedin: SocialPlatformStatus;
   facebook: SocialPlatformStatus;
-  twitter: { appConfigured: boolean; connected: boolean };
+  twitter: { appConfigured: boolean; connected: boolean; features?: Record<string, boolean> };
   reddit: SocialPlatformStatus;
 }
 

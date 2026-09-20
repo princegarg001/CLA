@@ -258,3 +258,22 @@ test('a run stops drafting once its time budget is spent and still returns what 
     engine.tuning.maxRunMs = before;
   }
 });
+
+test('parseAssist reads WORTH/NEED/REPLY and rejects malformed output', () => {
+  const ok = engine.parseAssist('WORTH: strong\nNEED: A Stripe webhook handler that survives retries.\nREPLY: "Make the handler idempotent: store the event id before doing any work and return 200 fast. That way retries are harmless."');
+  assert.equal(ok.worth, 'strong');
+  assert.ok(ok.need.startsWith('A Stripe webhook'));
+  assert.ok(ok.reply.startsWith('Make the handler') && !ok.reply.startsWith('"'));
+  assert.equal(engine.parseAssist('WORTH: yes\nNEED: x\nREPLY: y'), null);
+  assert.equal(engine.parseAssist('nothing useful'), null);
+});
+
+test('assistReply refuses tiny input and fails clearly when the AI gives nothing usable', async (t) => {
+  fakeStore(t);
+  await assert.rejects(engine.assistReply({ text: 'hi' }), /at least a sentence/);
+  await assert.rejects(engine.assistReply({ text: 'Looking for a backend developer to build a Stripe integration for our app.' }), /usable answer/);
+  t.mock.method(aiService, 'safeComplete', async () => 'WORTH: maybe\nNEED: Help with webhook reliability.\nREPLY: Store the event id first and make the handler idempotent so retries do nothing twice.');
+  const out = await engine.assistReply({ text: 'Our Stripe webhooks sometimes double charge. Any ideas?', url: 'https://reddit.com/r/x/1' });
+  assert.equal(out.worth, 'maybe');
+  assert.equal(out.url, 'https://reddit.com/r/x/1');
+});

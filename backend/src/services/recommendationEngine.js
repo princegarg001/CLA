@@ -203,6 +203,43 @@ function parseCopy(text) {
   return out.why.length > 10 && out.message.length > 40 ? out : null;
 }
 
+// "Paste a post, get a reply": the founder finds a post in their own browser (Reddit, X, anywhere),
+// pastes the text, and gets a verdict, the need in one line, and a helpful public reply to post themselves.
+function parseAssist(text) {
+  const worth = /(?:^|\n)\s*WORTH:\s*(strong|maybe|no)\b/i.exec(text);
+  const need = /(?:^|\n)\s*NEED:\s*([\s\S]*?)(?=\n\s*REPLY:|$)/i.exec(text);
+  const reply = /(?:^|\n)\s*REPLY:\s*([\s\S]*)$/i.exec(text);
+  if (!worth || !need || !reply) return null;
+  const clean = (v) => v.trim().replace(/^["']|["']$/g, '').trim();
+  const out = { worth: worth[1].toLowerCase(), need: clean(need[1]), reply: clean(reply[1]) };
+  return out.need.length > 5 && out.reply.length > 30 ? out : null;
+}
+
+async function assistReply({ text, url }) {
+  const post = String(text || '').trim().slice(0, 4000);
+  if (post.length < 20) throw Object.assign(new Error('Paste the post title and text (at least a sentence)'), { status: 400 });
+  const settings = await db.getSettings();
+  const raw = await aiService.safeComplete(
+    {
+      system:
+        'You help a solo backend-engineering founder (AlphoTech: APIs, integrations, automation, Python/Node, DevOps) find clients on public forums. ' +
+        'You are given a post the founder found. Reply in EXACTLY this format:\n' +
+        'WORTH: <strong | maybe | no. strong = the author wants outside help with backend/automation work. maybe = a related problem where being helpful could lead to work. no = a job seeker, someone offering services, or unrelated>\n' +
+        'NEED: <one sentence: what this person actually needs>\n' +
+        'REPLY: <a public comment of 60-120 words that genuinely helps first: answer their question or give one concrete, correct tip. ' +
+        'Only if it is truly relevant, end with one short line saying you build this kind of thing and they can message you. ' +
+        'Never invent experience, clients, numbers or credentials. No links, no emojis, no hype, no placeholders.>' +
+        (settings.brand_voice ? ` Voice: ${settings.brand_voice}` : ''),
+      prompt: post,
+      maxTokens: 1500,
+    },
+    null
+  );
+  const parsed = raw && parseAssist(raw);
+  if (!parsed) throw Object.assign(new Error('The AI did not return a usable answer. Try again in a moment.'), { status: 503 });
+  return { ...parsed, url: url || null };
+}
+
 // Learned from outcomes: sources whose leads actually reply / convert get a small
 // boost, sources that only get dismissed get a small cut. Needs enough history to
 // mean anything, otherwise every source is neutral.
@@ -444,4 +481,4 @@ async function dismiss(leadId, reason = 'not a fit') {
   });
 }
 
-module.exports = { DEFAULT_ICP, tuning, parseCopy, scoreCandidate, recommendAction, templateMessage, sourceStats, findFollowups, generateBatch, getToday, getIcp, dismiss };
+module.exports = { DEFAULT_ICP, tuning, parseCopy, parseAssist, assistReply, scoreCandidate, recommendAction, templateMessage, sourceStats, findFollowups, generateBatch, getToday, getIcp, dismiss };

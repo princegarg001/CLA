@@ -15,6 +15,12 @@ router.post('/refresh', asyncHandler(async (req, res) => {
   ok(res, await engine.getToday());
 }));
 
+// POST /api/recommendations/assist { text, url? } — paste a post you found anywhere; get a verdict,
+// the need in one line, and a helpful reply to post yourself. Nothing is posted for you.
+router.post('/assist', asyncHandler(async (req, res) => {
+  ok(res, await engine.assistReply({ text: req.body && req.body.text, url: req.body && req.body.url }));
+}));
+
 // POST /api/recommendations/:leadId/dismiss { reason } — "not a fit": feeds the source weighting.
 router.post('/:leadId/dismiss', asyncHandler(async (req, res) => {
   const lead = await engine.dismiss(req.params.leadId, (req.body && req.body.reason) || 'not a fit');

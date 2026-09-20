@@ -9,6 +9,7 @@ import {
   useSetLeadStatus,
   useSourceStats,
   useTodayRecs,
+  useAssistReply,
   type RecItem,
   type RecKind,
 } from '../../data/hooks/useRecommendations';
@@ -18,6 +19,7 @@ const SOURCE_LABEL: Record<string, string> = {
   hn_freelancer: 'HN · seeking freelancer',
   hn_search: 'HN · asking for a dev',
   hn_hiring: 'HN · who is hiring',
+  reddit: 'Reddit',
   remoteok: 'RemoteOK',
   remotive: 'Remotive',
   wwr: 'We Work Remotely',
@@ -309,6 +311,120 @@ function SourceHealth() {
   );
 }
 
+// Reddit needs no API to read: these open Reddit's own search in the founder's logged-in browser,
+// newest first, last week only. Nothing is scraped or automated, and no password is ever shared.
+const RADAR_SUBS = ['forhire', 'SaaS', 'startups', 'webdev', 'Entrepreneur', 'smallbusiness'];
+const RADAR_QUERIES = ['looking for developer', 'need backend developer', 'hire freelance developer', 'need automation', 'build MVP'];
+
+const radarUrl = (sub: string, q: string) => `https://www.reddit.com/r/${sub}/search/?q=${encodeURIComponent(q)}&restrict_sr=1&sort=new&t=week`;
+
+function RedditRadar() {
+  const [sub, setSub] = useState(RADAR_SUBS[0]);
+  return (
+    <Card className="p-5">
+      <p className="text-[15px] font-bold">Reddit Radar</p>
+      <p className="text-xs text-text-faint mb-3">Pick a community, open a search in your own Reddit (logged in as you), then paste a post below to get a reply.</p>
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {RADAR_SUBS.map((s) => (
+          <button
+            key={s}
+            onClick={() => setSub(s)}
+            className={`rounded-full border px-3 py-1 text-xs ${s === sub ? 'border-amber text-amber bg-amber/10' : 'border-border-soft text-text-muted hover:border-amber'}`}
+          >
+            r/{s}
+          </button>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {RADAR_QUERIES.map((q) => (
+          <a key={q} href={radarUrl(sub, q)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-bg-soft border border-border-soft px-3 py-1.5 text-xs hover:border-amber">
+            <ExternalLink size={11} /> {q}
+          </a>
+        ))}
+        {sub === 'forhire' && (
+          <a href="https://www.reddit.com/r/forhire/new/" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-bg-soft border border-border-soft px-3 py-1.5 text-xs hover:border-amber">
+            <ExternalLink size={11} /> newest [HIRING] posts
+          </a>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+const WORTH_META = {
+  strong: { label: 'Worth answering', tone: 'success' },
+  maybe: { label: 'Maybe', tone: 'warning' },
+  no: { label: 'Skip it', tone: 'critical' },
+} as const;
+
+function PostAssist() {
+  const assist = useAssistReply();
+  const [text, setText] = useState('');
+  const [url, setUrl] = useState('');
+  const [reply, setReply] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  async function run() {
+    const r = await assist.mutateAsync({ text, url: url.trim() || undefined });
+    setReply(r.reply);
+  }
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(reply);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked: the text is still selectable in the box */
+    }
+  }
+
+  const result = assist.data;
+  return (
+    <Card className="p-5 space-y-3">
+      <div>
+        <p className="text-[15px] font-bold">Paste a post, get a reply</p>
+        <p className="text-xs text-text-faint">Works for any post you find, on Reddit, X or anywhere. You post the reply yourself.</p>
+      </div>
+      <input
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        placeholder="Link to the post (optional, so you can jump back to it)"
+        className="w-full rounded-lg bg-bg-soft border border-border-soft px-3 py-2 text-xs outline-none focus:border-amber"
+      />
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={5}
+        placeholder="Paste the post title and text here"
+        className="w-full rounded-lg bg-bg-soft border border-border-soft p-2.5 text-xs outline-none focus:border-amber resize-y"
+      />
+      <AccentButton label="Analyse and draft a reply" icon={Sparkles} loading={assist.isPending} disabled={text.trim().length < 20} onClick={run} />
+      {assist.isError && <p className="text-xs text-critical">{(assist.error as Error).message}</p>}
+      {result && (
+        <div className="rounded-xl border border-border-soft p-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <Badge tone={WORTH_META[result.worth].tone}>{WORTH_META[result.worth].label}</Badge>
+            <p className="text-xs text-text-muted">{result.need}</p>
+          </div>
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-semibold text-text-muted">Reply (edit, then post it yourself)</p>
+            <button onClick={copy} className="inline-flex items-center gap-1 text-[11px] text-amber hover:underline">
+              {copied ? <Check size={11} /> : <Copy size={11} />} {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <textarea value={reply} onChange={(e) => setReply(e.target.value)} rows={6} className="w-full rounded-lg bg-bg-soft border border-border-soft p-2.5 text-xs outline-none focus:border-amber resize-y" />
+          {result.url && (
+            <a href={result.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs text-amber hover:underline">
+              <ExternalLink size={12} /> Open the post to comment
+            </a>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export function DailyLeadsPage() {
   const { data: plan, isLoading, error, refetch } = useTodayRecs();
   const refresh = useRefreshRecs();
@@ -411,6 +527,11 @@ export function DailyLeadsPage() {
           )}
         </>
       )}
+
+      <div className="grid lg:grid-cols-2 gap-4 items-start">
+        <RedditRadar />
+        <PostAssist />
+      </div>
 
       <SourceHealth />
     </div>

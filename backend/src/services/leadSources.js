@@ -1,4 +1,5 @@
 const Parser = require('rss-parser');
+const redditService = require('./redditService');
 const logger = require('../utils/logger');
 
 // Free, keyless lead sources. Each fetcher returns candidates in ONE shape so the
@@ -181,6 +182,40 @@ async function hnPhraseSearch() {
   return out;
 }
 
+// Reddit, through the official API (needs REDDIT_* keys; returns nothing without them).
+// Subreddits are the ones in REDDIT_MONITORED_SUBS plus r/forhire, where "[HIRING]" posts are
+// exactly what we want. Only posts that read like a buyer are forwarded.
+async function reddit() {
+  if (!redditService.isConfigured()) return [];
+  const config = require('../config');
+  const subs = [...new Set([...config.redditMonitoredSubs, 'forhire'])];
+  const posts = await redditService.getNewPosts({ subreddits: subs, limit: 40 });
+  const out = [];
+  for (const p of posts) {
+    const text = `${p.title}
+${p.body || ''}`;
+    const tagged = /^s*[?s*hirings*]?/i.test(p.title);
+    const forHire = /[s*for hires*]/i.test(p.title);
+    if (forHire || SELLER_RE.test(text)) continue;
+    if (!(tagged || BUYER_RE.test(text)) || !TECH_RE.test(text)) continue;
+    out.push({
+      key: `reddit:${p.id}`,
+      source: 'reddit',
+      kind: 'seeking',
+      company: p.author,
+      name: p.author,
+      title: p.title.slice(0, 140),
+      text,
+      url: p.url,
+      postedAt: p.createdAt,
+      email: findEmail(text),
+      twitter: findTwitter(text),
+      location: `r/${p.subreddit}`,
+    });
+  }
+  return out;
+}
+
 // ---- Job boards -----------------------------------------------------------------
 
 async function remoteok() {
@@ -271,7 +306,7 @@ async function weWorkRemotely() {
   return out;
 }
 
-const SOURCES = { hn_freelancer: hnSeekingFreelancer, hn_search: hnPhraseSearch, hn_hiring: hnWhoIsHiring, remoteok, remotive, wwr: weWorkRemotely };
+const SOURCES = { hn_freelancer: hnSeekingFreelancer, hn_search: hnPhraseSearch, reddit, hn_hiring: hnWhoIsHiring, remoteok, remotive, wwr: weWorkRemotely };
 
 // Runs every source in parallel; one failing never affects the rest.
 async function fetchAll(only) {

@@ -100,6 +100,26 @@ async function getHotPosts({ subreddits, limit = 25 } = {}) {
 
 // The lead-gen surface: hot posts pre-filtered + ranked by keyword match,
 // so the app only shows posts actually worth a human glance.
+// Newest posts, oldest-first ordering irrelevant: the lead engine scores by age itself.
+// Unlike getHotPosts this never returns sample data — an unconfigured Reddit must yield nothing.
+async function getNewPosts({ subreddits, limit = 50 } = {}) {
+  if (!isConfigured()) return [];
+  const subs = subreddits && subreddits.length ? subreddits : config.redditMonitoredSubs;
+  const http = await client();
+  const results = await Promise.all(
+    subs.map(async (sub) => {
+      try {
+        const { data } = await http.get(`/r/${sub}/new`, { params: { limit } });
+        return (data.data?.children || []).map(normalizePost);
+      } catch (e) {
+        logger.warn('redditService.getNewPosts: subreddit fetch failed', { sub, error: e.response?.data || e.message });
+        return [];
+      }
+    })
+  );
+  return results.flat();
+}
+
 async function getOpportunities({ subreddits, keywords, limit = 25 } = {}) {
   const kws = keywords && keywords.length ? keywords : config.redditKeywords;
   const posts = await getHotPosts({ subreddits, limit });
@@ -312,6 +332,7 @@ function SAMPLE_POSTS(sub) {
 }
 
 module.exports = {
+  getNewPosts,
   isConfigured,
   status,
   getHotPosts,

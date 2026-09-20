@@ -133,3 +133,16 @@ export function useSaveIcp() {
 export function useSourceStats() {
   return useQuery({ queryKey: ['recs', 'sources'], queryFn: () => api.get<Record<string, SourceStat>>('/recommendations/sources') });
 }
+
+export interface AssistResult {
+  worth: 'strong' | 'maybe' | 'no';
+  need: string;
+  reply: string;
+  url: string | null;
+}
+
+export function useAssistReply() {
+  return useMutation({
+    mutationFn: (input: { text: string; url?: string }) => api.post<AssistResult>('/recommendations/assist', input),
+  });
+}

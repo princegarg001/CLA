@@ -180,3 +180,16 @@ export function useUnsuppress() {
   const refresh = useRefresh();
   return useMutation({ mutationFn: (email: string) => api.del<string[]>(`/outreach/suppressed/${encodeURIComponent(email)}`), onSettled: refresh });
 }
+
+export function useDraftThreadReply() {
+  return useMutation({ mutationFn: (leadId: string) => api.post<{ reply: string; ai: boolean; to: string; subject: string }>(`/outreach/threads/${leadId}/draft-reply`) });
+}
+
+export function useReplyToThread() {
+  const refresh = useRefresh();
+  return useMutation({
+    mutationFn: ({ leadId, body, subject }: { leadId: string; body: string; subject?: string }) =>
+      api.post<{ message: OutreachMessage }>(`/outreach/threads/${leadId}/reply`, { body, subject }),
+    onSettled: refresh,
+  });
+}

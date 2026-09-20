@@ -204,7 +204,11 @@ function friendlySmtpError(e) {
 
 // Drops the quoted history so only what the person actually wrote is kept.
 function stripQuoted(text = '') {
-  const lines = String(text).replace(/\r\n/g, '\n').split('\n');
+  let full = String(text).replace(/\r\n/g, '\n');
+  // Gmail and others wrap the attribution line ("On Sun, 20 Sep 2026, 7:23 pm Name <a@b.com>\nwrote:").
+  const wrapped = /\n[ \t]*On [^\n]{5,200}(?:\n[^\n]{0,160})?[ \t]*wrote:[ \t]*(?:\n|$)/i.exec(full);
+  if (wrapped) full = full.slice(0, wrapped.index);
+  const lines = full.split('\n');
   const out = [];
   for (const line of lines) {
     if (/^\s*>/.test(line)) break;

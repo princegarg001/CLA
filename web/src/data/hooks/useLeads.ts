@@ -18,3 +18,13 @@ export function useUpdateLead() {
     },
   });
 }
+
+export function useCreateLead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name?: string; company?: string; email: string }) => api.post<Lead>('/leads', { ...body, source: 'manual', status: 'new' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['leads'] });
+    },
+  });
+}

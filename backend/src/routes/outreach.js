@@ -69,6 +69,14 @@ router.post('/from-lead', strictLimiter, asyncHandler(async (req, res) => {
   ok(res, await outreach.sendMessage(draft.id, { force: !!force }));
 }));
 
+// POST /api/outreach/threads/:leadId/draft-reply — AI suggests the next reply (nothing is sent).
+router.post('/threads/:leadId/draft-reply', strictLimiter, asyncHandler(async (req, res) => ok(res, await outreach.draftThreadReply(req.params.leadId))));
+
+// POST /api/outreach/threads/:leadId/reply { body, subject? } — answer inside the conversation and send it.
+router.post('/threads/:leadId/reply', strictLimiter, asyncHandler(async (req, res) => {
+  ok(res, await outreach.replyToThread(req.params.leadId, { body: req.body && req.body.body, subject: req.body && req.body.subject }));
+}));
+
 // PATCH /api/outreach/messages/:id — edit a draft. Status changes go through the explicit actions
 // below, so nothing can be marked "sent" without actually being sent.
 router.patch('/messages/:id', asyncHandler(async (req, res) => {

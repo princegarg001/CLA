@@ -474,3 +474,68 @@ test('IMAP tries every likely GoDaddy server, remembers the one that works, and 
     Object.assign(config, saved);
   }
 });
+
+test('quoted history is cut even when the "On ... wrote:" line is wrapped over two lines', () => {
+  const t = 'Thanks\n\nOn Sun, 20 Sep 2026, 7:23 pm Prince from AlphoTech, <support@alphotech.com>\nwrote:\n> Hi there\n> knn';
+  assert.equal(mailService.stripQuoted(t), 'Thanks');
+  assert.equal(mailService.stripQuoted('Sure, Thursday works.\n\nOn Mon, Sep 21, 2026 at 9:00 AM Me <me@x.com> wrote:\n> hi'), 'Sure, Thursday works.');
+  assert.equal(mailService.stripQuoted('I will be on Monday to review.\nSpeak soon'), 'I will be on Monday to review.\nSpeak soon', 'ordinary "On" sentences are kept');
+});
+
+function conversation() {
+  return [
+    sentMsg({ id: 'S1', channel: 'email', subject: 'Quick idea', body: 'first', sent_at: iso(NOW - DAY), status: 'replied', meta: { to: 'dana@acme.io', messageId: '<a@x>', threadId: 'S1', references: [] } }),
+    { id: 'I1', lead_id: 'L1', channel: 'email', direction: 'inbound', status: 'received', subject: 'Re: Quick idea', body: 'Interested, can you send pricing?', created_at: iso(NOW - 3600000), meta: { kind: 'reply', from: 'dana@acme.io', messageId: '<in@acme>', threadId: 'S1' } },
+  ];
+}
+
+test('replyContext works out who to answer, the subject and the headers that keep the thread together', () => {
+  const ctx = outreach.replyContext('L1', conversation());
+  assert.equal(ctx.to, 'dana@acme.io');
+  assert.equal(ctx.subject, 'Re: Quick idea');
+  assert.equal(ctx.inReplyTo, '<in@acme>');
+  assert.deepEqual(ctx.references, ['<a@x>', '<in@acme>']);
+  assert.equal(ctx.threadId, 'S1');
+  assert.equal(outreach.replyContext('nobody', conversation()), null);
+});
+
+test('replying in a conversation sends in-thread, without the cold-email footer, and schedules no follow-up', async (t) => {
+  const store = fakeDb(t, { leads: [lead({ status: 'replied' })], messages: conversation(), settings: { outreach: { signature: 'Prince' } } });
+  const sent = fakeSmtp(t);
+  const { message } = await outreach.replyToThread('L1', { body: 'Great, pricing is below. Free for a call Thursday?', now: NOW });
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].to, 'dana@acme.io');
+  assert.equal(sent[0].subject, 'Re: Quick idea');
+  assert.equal(sent[0].inReplyTo, '<in@acme>');
+  assert.ok(sent[0].text.includes('Thursday') && sent[0].text.includes('Prince'));
+  assert.ok(!sent[0].text.includes('no thanks'), 'no opt-out block in a live conversation');
+  assert.equal(message.status, 'sent');
+  assert.equal(message.meta.nextFollowupAt, null);
+  assert.equal(store.leads[0].status, 'replied', 'lead stays where it is');
+
+  // the thread no longer waits on you
+  const th = outreach.buildThreads(store.messages, store.leads)[0];
+  assert.equal(th.awaitingYou, false);
+});
+
+test('a reply still respects the mailbox limit and the do-not-contact list', async (t) => {
+  fakeDb(t, { leads: [lead({ status: 'replied' })], messages: conversation(), settings: { outreach_suppressed: ['dana@acme.io'] } });
+  fakeSmtp(t);
+  await assert.rejects(outreach.replyToThread('L1', { body: 'Hello again', now: NOW }), /do-not-contact/);
+  t.mock.restoreAll();
+  fakeDb(t, { leads: [lead()], messages: [] });
+  fakeSmtp(t);
+  await assert.rejects(outreach.replyToThread('L1', { body: 'Hello', now: NOW }), /no email conversation/);
+  await assert.rejects(outreach.replyToThread('L1', { body: '  ' }), /Write a reply/);
+});
+
+test('a suggested reply falls back to a plain template when the AI is unavailable, and sends nothing', async (t) => {
+  fakeDb(t, { leads: [lead({ status: 'replied' })], messages: conversation() });
+  const sent = fakeSmtp(t);
+  const d = await outreach.draftThreadReply('L1');
+  assert.equal(d.ai, false);
+  assert.equal(d.to, 'dana@acme.io');
+  assert.ok(d.reply.includes('Hi Dana'));
+  assert.equal(sent.length, 0);
+});

@@ -72,9 +72,11 @@ function splitSubject(body) {
 }
 
 // What is actually emailed: the body plus signature and the opt-out footer.
-function composeEmailText(body, settings) {
+function composeEmailText(body, settings, { conversation = false } = {}) {
   const parts = [String(body || '').trim()];
   if (settings.signature) parts.push(settings.signature.trim());
+  // Someone who has already written back is in a conversation, not a cold email: no opt-out block.
+  if (conversation) return parts.join('\n\n');
   const foot = [settings.footer, settings.postalAddress].filter((x) => x && x.trim()).map((x) => x.trim());
   if (foot.length) parts.push(`--\n${foot.join('\n')}`);
   return parts.join('\n\n');
@@ -335,7 +337,7 @@ async function sendMessage(id, { force = false, now = Date.now() } = {}) {
   const m = meta(msg);
   const to = m.to || (lead && lead.email);
   const settings = await getSettings();
-  const isFollowup = !!m.followupOf;
+  const isFollowup = !!m.followupOf || !!m.conversationReply;
   const check = sendCheck({ lead, to, settings, suppressed: await getSuppressed(), messages: await db.list('messages'), isFollowup, force, now });
   if (!check.ok) throw Object.assign(new Error(check.blockers[0]), { status: 422, blockers: check.blockers });
 
@@ -345,14 +347,14 @@ async function sendMessage(id, { force = false, now = Date.now() } = {}) {
 
   try {
     const result = await mailService.send({
-      to, subject: msg.subject, text: composeEmailText(msg.body, settings),
+      to, subject: msg.subject, text: composeEmailText(msg.body, settings, { conversation: !!m.conversationReply }),
       inReplyTo: m.inReplyTo, references: m.references,
     });
     const sentAt = new Date(now).toISOString();
     const step = m.followupStep || 0;
     const updated = await db.update('messages', id, {
       status: 'sent', sent_at: sentAt,
-      meta: { ...m, to, messageId: result.messageId, threadId: m.threadId || id, followupStep: step, nextFollowupAt: nextFollowupAt(sentAt, step, settings), lastError: null },
+      meta: { ...m, to, messageId: result.messageId, threadId: m.threadId || id, followupStep: step, nextFollowupAt: m.conversationReply ? null : nextFollowupAt(sentAt, step, settings), lastError: null },
     });
     if (lead && lead.status === 'new') await db.update('leads', lead.id, { status: 'contacted' });
     return { message: updated, warnings: check.warnings };
@@ -408,6 +410,77 @@ async function recordReply(id, { text } = {}) {
     if (lead && ['new', 'contacted'].includes(lead.status)) await db.update('leads', lead.id, { status: 'replied' });
   }
   return db.get('messages', id);
+}
+
+// ---- replying inside a conversation ------------------------------------------------------------
+
+// Everything needed to answer the latest thing a lead wrote: who to, the subject, and the headers
+// that keep it in the same thread in their mail app.
+function replyContext(leadId, messages) {
+  const list = messages
+    .filter((m) => m.lead_id === leadId)
+    .sort((a, b) => new Date(a.sent_at || a.created_at || 0) - new Date(b.sent_at || b.created_at || 0));
+  const inbound = [...list].reverse().find((m) => m.direction === 'inbound' && meta(m).kind === 'reply');
+  const outbound = [...list].reverse().find((m) => m.direction === 'outbound' && ['sent', 'replied'].includes(m.status) && EMAIL_CHANNELS.has(m.channel));
+  const anchor = inbound || outbound;
+  if (!anchor) return null;
+  const to = (inbound && meta(inbound).from) || (outbound && meta(outbound).to) || null;
+  const baseSubject = String((inbound && inbound.subject) || (outbound && outbound.subject) || '').replace(/^(re:\s*)+/i, '').trim();
+  const refs = [...(outbound ? meta(outbound).references || [] : []), outbound && meta(outbound).messageId, inbound && meta(inbound).messageId].filter(Boolean);
+  return {
+    to,
+    subject: `Re: ${baseSubject || 'your message'}`,
+    inReplyTo: (inbound && meta(inbound).messageId) || (outbound && meta(outbound).messageId) || null,
+    references: [...new Set(refs)],
+    threadId: (outbound && (meta(outbound).threadId || outbound.id)) || null,
+    history: list.slice(-6).map((m) => ({ from: m.direction === 'inbound' ? 'them' : 'me', text: String(m.body || '').slice(0, 700) })),
+  };
+}
+
+async function replyToThread(leadId, { body, subject, now = Date.now() } = {}) {
+  if (!String(body || '').trim()) throw Object.assign(new Error('Write a reply first'), { status: 400 });
+  const lead = await db.get('leads', leadId);
+  if (!lead) throw Object.assign(new Error('Lead not found'), { status: 404 });
+  const ctx = replyContext(leadId, await db.list('messages'));
+  if (!ctx || !ctx.to) throw Object.assign(new Error('There is no email conversation with this lead to reply to.'), { status: 400 });
+  let draft;
+  try {
+    draft = await db.insert('messages', {
+      lead_id: leadId, channel: 'email', direction: 'outbound', subject: String(subject || ctx.subject).slice(0, 300), body: String(body).trim(),
+      ai_generated: false, status: 'draft',
+      meta: { to: ctx.to, threadId: ctx.threadId, inReplyTo: ctx.inReplyTo, references: ctx.references, conversationReply: true },
+    });
+  } catch (e) {
+    throw explainDbError(e);
+  }
+  return sendMessage(draft.id, { now });
+}
+
+const REPLY_FALLBACK = 'Hi {{first_name}},\n\nThanks for getting back to me. Happy to talk it through: would a short call this week work? Tell me a couple of times that suit you and I will send an invite.\n\nBest,';
+
+// A suggested reply the founder edits before sending. Never sent by itself.
+async function draftThreadReply(leadId) {
+  const lead = await db.get('leads', leadId);
+  if (!lead) throw Object.assign(new Error('Lead not found'), { status: 404 });
+  const ctx = replyContext(leadId, await db.list('messages'));
+  if (!ctx) throw Object.assign(new Error('There is no email conversation with this lead yet.'), { status: 400 });
+  const settings = await db.getSettings();
+  const raw = await aiService.safeComplete(
+    {
+      system:
+        'You write the next email reply for a solo founder at AlphoTech (backend and automation studio) in a conversation with a prospect. ' +
+        'Reply in EXACTLY this format:\nREPLY: <40-110 words, plain text, no signature>\n' +
+        'Rules: answer what they actually said or asked; if they showed interest, propose one concrete next step (a short call, two time options); ' +
+        'if they said no or not now, thank them and leave the door open; never invent experience, prices, results or commitments; no emojis, no placeholders.' +
+        (settings.brand_voice ? ` Voice: ${settings.brand_voice}` : ''),
+      prompt: JSON.stringify({ prospect: lead.name || lead.company, conversation: ctx.history }),
+      maxTokens: 1500,
+    },
+    null
+  );
+  const m = raw && /(?:^|\n)\s*REPLY:\s*([\s\S]*)$/i.exec(raw);
+  if (m && m[1].trim().length > 20) return { reply: m[1].trim(), ai: true, to: ctx.to, subject: ctx.subject };
+  return { reply: renderTemplate(REPLY_FALLBACK, lead), ai: false, to: ctx.to, subject: ctx.subject };
 }
 
 // ---- scheduled work ---------------------------------------------------------------
@@ -543,5 +616,5 @@ async function overview() {
 module.exports = {
   DEFAULTS, getSettings, saveSettings, renderTemplate, splitSubject, composeEmailText, nextFollowupAt, sentInLast24h, sendCheck, inSendWindow,
   matchInbound, stats, buildThreads, parseReplyInsight, parseEmailDraft, draftEmail, draftFollowup, createDraft, sendMessage, markSent, recordReply,
-  runFollowups, syncReplies, overview, getSuppressed, suppress, unsuppress, cancelThreadFollowups,
+  replyContext, replyToThread, draftThreadReply, runFollowups, syncReplies, overview, getSuppressed, suppress, unsuppress, cancelThreadFollowups,
 };

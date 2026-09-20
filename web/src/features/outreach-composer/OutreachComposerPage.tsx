@@ -3,10 +3,12 @@ import { MessageSquare, RefreshCw, Send, Sparkles, Copy, Check, Trash2, AlertTri
 import {
   useDeleteMessage,
   useDeleteTemplate,
+  useDraftThreadReply,
   useGenerateDraft,
   useMarkSent,
   useOutreachOverview,
   useRecordReply,
+  useReplyToThread,
   useRunFollowups,
   useSaveDraft,
   useSaveOutreachSettings,
@@ -20,7 +22,7 @@ import {
   useVerifyEmail,
   type OutreachThread,
 } from '../../data/hooks/useOutreach';
-import { useLeads } from '../../data/hooks/useLeads';
+import { useCreateLead, useLeads } from '../../data/hooks/useLeads';
 import { Card, TabBar, IconButton, LoadingState, EmptyState, ErrorState, Badge, AccentButton } from '../../components/ui';
 import { leadDisplayName, type MessageTemplate, type OutreachMessage } from '../../data/types';
 
@@ -236,11 +238,73 @@ function MessageItem({ m, threadEmail }: { m: OutreachMessage; threadEmail?: str
   );
 }
 
+// ---- reply inside a conversation ------------------------------------------------------
+
+// Who the next email would go to: the address the last reply came from, else where we last wrote.
+function replyTarget(t: OutreachThread): string | null {
+  const inbound = [...t.messages].reverse().find((m) => m.direction === 'inbound' && m.meta?.from);
+  if (inbound?.meta?.from) return inbound.meta.from;
+  const out = [...t.messages].reverse().find((m) => m.direction === 'outbound' && isEmailChannel(m.channel) && m.meta?.to && (m.status === 'sent' || m.status === 'replied'));
+  return out?.meta?.to || null;
+}
+
+function ReplyBox({ t }: { t: OutreachThread }) {
+  const draftReply = useDraftThreadReply();
+  const reply = useReplyToThread();
+  const [text, setText] = useState('');
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const to = replyTarget(t);
+  if (!t.lead || !to) return null;
+  const leadId = t.lead.id;
+
+  async function suggest() {
+    setNote(null);
+    try {
+      const d = await draftReply.mutateAsync(leadId);
+      setText(d.reply);
+      if (!d.ai) setNote({ ok: true, text: 'The AI was unavailable, so this is a standard reply. Personalise it before sending.' });
+    } catch (e) {
+      setNote({ ok: false, text: errText(e) });
+    }
+  }
+
+  async function send() {
+    if (!text.trim()) return;
+    if (!window.confirm(`Send this reply to ${to} now?`)) return;
+    setNote(null);
+    try {
+      await reply.mutateAsync({ leadId, body: text });
+      setText('');
+      setNote({ ok: true, text: `Sent to ${to}.` });
+    } catch (e) {
+      setNote({ ok: false, text: errText(e) });
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-border-soft bg-bg-soft p-3.5 space-y-2.5">
+      <p className="text-[11px] font-semibold text-text-muted">
+        Reply to {to} <span className="font-normal text-text-faint">(sent in the same thread)</span>
+      </p>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={5} placeholder="Write your reply…" className="w-full rounded-lg bg-surface border border-border-soft p-2.5 text-sm outline-none focus:border-amber resize-y" />
+      {note && <p className={`text-xs ${note.ok ? 'text-success' : 'text-critical'}`}>{note.text}</p>}
+      <div className="flex flex-wrap gap-2">
+        <button onClick={suggest} disabled={draftReply.isPending || reply.isPending} className="inline-flex items-center gap-1.5 rounded-lg border border-amber/50 text-amber px-3 py-1.5 text-xs font-semibold hover:bg-amber/10 disabled:opacity-50">
+          <Sparkles size={12} /> {draftReply.isPending ? 'Drafting…' : 'Draft a reply with AI'}
+        </button>
+        <button onClick={send} disabled={reply.isPending || draftReply.isPending || !text.trim()} className="inline-flex items-center gap-1.5 rounded-lg bg-amber text-[#221604] px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
+          <Send size={12} /> {reply.isPending ? 'Sending…' : 'Send reply'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ---- conversations --------------------------------------------------------------------
 
 function ThreadCard({ t }: { t: OutreachThread }) {
   const [open, setOpen] = useState(t.awaitingYou || t.hasDraft);
-  const name = t.lead ? t.lead.name || t.lead.email || 'Unknown contact' : 'No lead attached';
+  const name = t.lead ? t.lead.name || t.lead.email || '' : 'No lead attached';
   const last = t.messages[t.messages.length - 1];
   return (
     <Card className="p-4">
@@ -248,7 +312,7 @@ function ThreadCard({ t }: { t: OutreachThread }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="font-semibold text-sm truncate">{t.lead?.company || name}</p>
-            {t.lead?.company && <span className="text-xs text-text-faint truncate">{name}</span>}
+            {t.lead?.company && name && <span className="text-xs text-text-faint truncate">{name}</span>}
             {t.awaitingYou && <Badge tone="success">Reply to them</Badge>}
             {t.hasDraft && <Badge tone="warning">Draft</Badge>}
             {t.lead && <Badge tone="muted">{t.lead.status.replace('_', ' ')}</Badge>}
@@ -262,6 +326,7 @@ function ThreadCard({ t }: { t: OutreachThread }) {
           {t.messages.map((m) => (
             <MessageItem key={m.id} m={m} threadEmail={t.lead?.email} />
           ))}
+          <ReplyBox t={t} />
         </div>
       )}
     </Card>
@@ -299,8 +364,10 @@ function ComposeTab({ mailReady }: { mailReady: boolean }) {
   const update = useUpdateMessage();
   const send = useSendMessage();
   const markSent = useMarkSent();
+  const createLead = useCreateLead();
 
   const [leadId, setLeadId] = useState('');
+  const [newContact, setNewContact] = useState<{ name: string; company: string; email: string } | null>(null);
   const [channel, setChannel] = useState('email');
   const [tone, setTone] = useState('founder_to_founder');
   const [market, setMarket] = useState('US');
@@ -316,7 +383,28 @@ function ComposeTab({ mailReady }: { mailReady: boolean }) {
   const email = isEmailChannel(channel);
   const busy = generate.isPending || saveDraft.isPending || update.isPending || send.isPending || markSent.isPending;
 
+  async function saveNewContact() {
+    if (!newContact) return;
+    setNotice(null);
+    try {
+      const created = await createLead.mutateAsync({ name: newContact.name.trim() || undefined, company: newContact.company.trim() || undefined, email: newContact.email.trim() });
+      setNewContact(null);
+      setLeadId(created.id);
+      setTo(created.email || newContact.email.trim());
+      setNotice({ ok: true, text: 'Contact saved. Now generate or write your message.' });
+    } catch (e) {
+      setNotice({ ok: false, text: errText(e) });
+    }
+  }
+
   function pickLead(id: string) {
+    if (id === '__new__') {
+      setNewContact({ name: '', company: '', email: '' });
+      setLeadId('');
+      setDraftId(null);
+      return;
+    }
+    setNewContact(null);
     setLeadId(id);
     setDraftId(null);
     setSubject('');
@@ -390,15 +478,30 @@ function ComposeTab({ mailReady }: { mailReady: boolean }) {
       <p className="text-[15px] font-bold">New message</p>
       <div>
         <label className="text-xs font-semibold text-text-muted block mb-1.5">To</label>
-        <select value={leadId} onChange={(e) => pickLead(e.target.value)} className="w-full rounded-lg bg-bg-soft border border-border-soft px-3 py-2.5 text-sm outline-none focus:border-amber">
+        <select value={newContact ? '__new__' : leadId} onChange={(e) => pickLead(e.target.value)} className="w-full rounded-lg bg-bg-soft border border-border-soft px-3 py-2.5 text-sm outline-none focus:border-amber">
           <option value="">Select a lead…</option>
+          <option value="__new__">＋ New contact (someone not in my leads)</option>
           {(leads || []).filter((l) => l.status !== 'closed_lost').map((l) => (
             <option key={l.id} value={l.id}>
               {l.name ? `${l.name}${l.company ? ` · ${l.company}` : ''}` : l.company || l.email || leadDisplayName(l)} ({l.score}/10)
             </option>
           ))}
         </select>
-        {lead && !lead.email && email && <p className="text-xs text-warning mt-1.5">This lead has no email address. Type one below, or pick another channel.</p>}
+        {newContact && (
+          <div className="mt-3 rounded-xl border border-border-soft p-3 space-y-2">
+            <div className="grid sm:grid-cols-3 gap-2">
+              <input value={newContact.name} onChange={(e) => setNewContact({ ...newContact, name: e.target.value })} placeholder="Name" className="rounded-lg bg-bg-soft border border-border-soft px-3 py-2 text-sm outline-none focus:border-amber" />
+              <input value={newContact.company} onChange={(e) => setNewContact({ ...newContact, company: e.target.value })} placeholder="Company" className="rounded-lg bg-bg-soft border border-border-soft px-3 py-2 text-sm outline-none focus:border-amber" />
+              <input value={newContact.email} onChange={(e) => setNewContact({ ...newContact, email: e.target.value })} placeholder="Email address" className="rounded-lg bg-bg-soft border border-border-soft px-3 py-2 text-sm outline-none focus:border-amber" />
+            </div>
+            <AccentButton label="Save contact" loading={createLead.isPending} disabled={!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(newContact.email.trim())} onClick={saveNewContact} />
+            <p className="text-[11px] text-text-faint">Saved to your leads, so its emails and replies stay together under this contact.</p>
+          </div>
+        )}
+        {lead && !lead.email && email && <p className="text-xs text-warning mt-1.5">This lead has no email address saved. If you type one below, the conversation is filed under this lead. To email a different person, choose "New contact" above.</p>}
+        {lead && lead.email && email && to.trim() && to.trim().toLowerCase() !== lead.email.toLowerCase() && (
+          <p className="text-xs text-warning mt-1.5">This address differs from {lead.name || lead.company}'s saved email ({lead.email}). The conversation and any reply will be filed under this lead.</p>
+        )}
       </div>
       <div className="grid sm:grid-cols-2 gap-4">
         <div>

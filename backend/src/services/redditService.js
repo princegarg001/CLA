@@ -2,6 +2,7 @@ const axios = require('axios');
 const config = require('../config');
 const aiService = require('./aiService');
 const logger = require('../utils/logger');
+const { isRetriable, upstreamMessage } = require('../utils/http');
 
 // "Script" app OAuth2 (password grant) — the right app type for a single
 // account acting as itself (not on behalf of other users), which is exactly
@@ -154,24 +155,127 @@ async function postComment({ parentFullname, text }) {
   }
 }
 
-async function submitPost({ subreddit, title, text }) {
+// Reddit reports submit failures as [CODE, message, field] triples inside a
+// 200 response. Turn the common ones into something actionable, and pull the
+// wait time out of RATELIMIT so the scheduler can retry at the right moment.
+function interpretSubmitErrors(errors) {
+  const first = errors[0] || [];
+  const code = first[0];
+  const raw = errors.map((e) => e.slice(0, 2).join(': ')).join('; ');
+  const friendly = {
+    SUBREDDIT_NOEXIST: "That subreddit doesn't exist.",
+    SUBREDDIT_NOTALLOWED: "You're not allowed to post in that subreddit (banned, or it's restricted/private).",
+    SUBREDDIT_REQUIRED: 'Choose a subreddit to post in.',
+    NO_SELFS: "That subreddit doesn't allow text posts — use a link or image post.",
+    NO_LINKS: "That subreddit doesn't allow link posts — use a text post.",
+    SUBMIT_VALIDATION_FLAIR_REQUIRED: 'That subreddit requires a post flair — pick one before posting.',
+    TOO_LONG: 'The title or body is too long for Reddit.',
+    ALREADY_SUB: 'That link has already been submitted to this subreddit.',
+    USER_REQUIRED: 'Reddit rejected the login — check REDDIT_USERNAME/PASSWORD (and 2FA) on the server.',
+  };
+  let retriable = false;
+  let retryAfterSec;
+  if (code === 'RATELIMIT') {
+    retriable = true;
+    const m = /(\d+)\s*(minute|second)/i.exec(first[1] || '');
+    retryAfterSec = m ? Number(m[1]) * (m[2].toLowerCase() === 'minute' ? 60 : 1) + 30 : 600;
+  }
+  return { message: friendly[code] || raw, retriable, retryAfterSec };
+}
+
+// Reddit image posts: lease an S3 upload slot, upload the bytes there, then
+// submit with the resulting hosted URL.
+async function uploadImageAsset(http, { buffer, mime, filename }) {
+  const lease = await http.post('/api/media/asset.json', new URLSearchParams({ filepath: filename, mimetype: mime }));
+  const args = lease.data?.args;
+  if (!args?.action) throw new Error('Reddit did not return an upload slot');
+  const action = args.action.startsWith('//') ? `https:${args.action}` : args.action;
+
+  const form = new FormData();
+  for (const f of args.fields || []) form.append(f.name, f.value);
+  form.append('file', new Blob([buffer], { type: mime }), filename);
+  const res = await fetch(action, { method: 'POST', body: form });
+  if (!res.ok) throw new Error(`Reddit image upload failed (${res.status})`);
+
+  const key = (args.fields || []).find((f) => f.name === 'key')?.value;
+  return `${action}/${key}`;
+}
+
+// kind: 'self' (text) | 'link' | 'image'. For images pass `media` = { buffer,
+// mime, name }. flairId is optional but some subreddits require one.
+async function submit({ subreddit, title, kind = 'self', text, linkUrl, media, flairId }) {
   if (!subreddit || !title) throw Object.assign(new Error('subreddit and title are required'), { status: 400 });
   if (!isConfigured()) {
     return { status: 'skipped', reason: 'Reddit not connected — set REDDIT_* env vars to post live.', sample: true };
   }
+  const sr = String(subreddit).replace(/^r\//i, '');
   try {
     const http = await client();
-    const { data } = await http.post(
-      '/api/submit',
-      new URLSearchParams({ api_type: 'json', sr: subreddit, kind: 'self', title, text: text || '', resubmit: 'true' })
-    );
+    const params = { api_type: 'json', sr, kind, title, resubmit: 'true', sendreplies: 'true' };
+    if (flairId) params.flair_id = flairId;
+
+    if (kind === 'self') params.text = text || '';
+    else if (kind === 'link') params.url = linkUrl;
+    else if (kind === 'image') {
+      params.url = await uploadImageAsset(http, { buffer: media.buffer, mime: media.mime, filename: media.name || 'image' });
+    }
+
+    const { data } = await http.post('/api/submit', new URLSearchParams(params));
     const errors = data.json?.errors;
-    if (errors && errors.length) throw new Error(errors.map((e) => e.join(' ')).join('; '));
-    return { status: 'success', url: data.json?.data?.url || null, id: data.json?.data?.id || null };
+    if (errors && errors.length) {
+      const { message, retriable, retryAfterSec } = interpretSubmitErrors(errors);
+      return { status: 'failed', error: message, retriable, retryAfterSec };
+    }
+    const d = data.json?.data || {};
+    return {
+      status: 'success',
+      externalPostId: d.name || d.id || null,
+      id: d.id || null,
+      // Image posts finish processing asynchronously and only return the
+      // account's submissions page until then.
+      url: d.url || d.user_submitted_page || null,
+    };
   } catch (e) {
-    logger.error('redditService.submitPost failed', { error: e.response?.data || e.message });
-    return { status: 'failed', error: e.response?.data?.message || e.message };
+    logger.error('redditService.submit failed', { error: e.response?.data || e.message });
+    return { status: 'failed', error: upstreamMessage(e), retriable: isRetriable(e) };
   }
+}
+
+// Back-compat wrapper for the original text-only signature.
+function submitPost({ subreddit, title, text }) {
+  return submit({ subreddit, title, kind: 'self', text });
+}
+
+// What a subreddit allows and requires — shown in the composer so a post
+// isn't rejected for a missing flair or a forbidden post type.
+async function getSubredditInfo(subreddit) {
+  const sr = String(subreddit || '').replace(/^r\//i, '');
+  if (!sr) throw Object.assign(new Error('subreddit is required'), { status: 400 });
+  if (!isConfigured()) {
+    return {
+      sample: true,
+      name: sr,
+      subscribers: null,
+      submissionType: 'any',
+      over18: false,
+      rules: [{ name: 'Sample rule', description: 'Connect Reddit to see this subreddit\'s real rules.' }],
+      flairs: [],
+    };
+  }
+  const http = await client();
+  const [about, rules, flairs] = await Promise.all([
+    http.get(`/r/${sr}/about`).then((r) => r.data?.data || {}).catch(() => ({})),
+    http.get(`/r/${sr}/about/rules`).then((r) => r.data?.rules || []).catch(() => []),
+    http.get(`/r/${sr}/api/link_flair_v2`).then((r) => (Array.isArray(r.data) ? r.data : [])).catch(() => []),
+  ]);
+  return {
+    name: about.display_name || sr,
+    subscribers: about.subscribers ?? null,
+    submissionType: about.submission_type || 'any',
+    over18: !!about.over18,
+    rules: rules.map((r) => ({ name: r.short_name, description: (r.description || '').slice(0, 300) })),
+    flairs: flairs.map((f) => ({ id: f.id, text: f.text })),
+  };
 }
 
 async function getKarma() {
@@ -215,6 +319,8 @@ module.exports = {
   searchPosts,
   draftReply,
   postComment,
+  submit,
   submitPost,
+  getSubredditInfo,
   getKarma,
 };

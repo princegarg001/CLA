@@ -2,6 +2,8 @@ const axios = require('axios');
 const crypto = require('crypto');
 const config = require('../config');
 const logger = require('../utils/logger');
+const { isRetriable, upstreamMessage } = require('../utils/http');
+const { splitThread } = require('./socialRules');
 
 // Read-only calls (v2 GET endpoints) work fine with the app-only bearer token.
 function readClient() {
@@ -31,7 +33,7 @@ function oauth1Header(method, url, extraParams = {}) {
     .sort()
     .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(allParams[k])}`)
     .join('&');
-  const baseString = ['POST', encodeURIComponent(url), encodeURIComponent(paramString)].join('&');
+  const baseString = [method.toUpperCase(), encodeURIComponent(url), encodeURIComponent(paramString)].join('&');
   const signingKey = `${encodeURIComponent(config.twitterApiSecret)}&${encodeURIComponent(config.twitterAccessSecret)}`;
   const signature = crypto.createHmac('sha1', signingKey).update(baseString).digest('base64');
   const signedParams = { ...oauthParams, oauth_signature: signature };
@@ -66,7 +68,7 @@ function canPost() {
   return config.isConfigured('twitterWrite');
 }
 
-async function postTweet(text, { replyToId } = {}) {
+async function postTweet(text, { replyToId, mediaIds } = {}) {
   if (!canPost()) {
     return {
       id: `sample_${Date.now()}`, text, sample: true,
@@ -74,11 +76,131 @@ async function postTweet(text, { replyToId } = {}) {
     };
   }
   try {
-    const body = replyToId ? { text, reply: { in_reply_to_tweet_id: replyToId } } : { text };
+    const body = {};
+    if (text) body.text = text;
+    if (replyToId) body.reply = { in_reply_to_tweet_id: replyToId };
+    if (mediaIds && mediaIds.length) body.media = { media_ids: mediaIds };
     return await writePost('/tweets', body);
   } catch (e) {
     logger.error('twitterService.postTweet failed', { error: e.response?.data || e.message });
-    throw Object.assign(new Error(`Tweet post failed: ${e.response?.data?.detail || e.message}`), { status: 502 });
+    throw Object.assign(new Error(`Tweet post failed: ${upstreamMessage(e)}`), { status: 502, retriable: isRetriable(e) });
+  }
+}
+
+// ---- Media upload (X API v2) -------------------------------------------------
+// Images ≤5MB go up in one request; GIFs and videos use the chunked
+// initialize → append → finalize flow and then poll until X finishes
+// processing. Multipart/JSON bodies aren't part of an OAuth1 signature, so
+// only the URL (and, for the GET status check, its query) is signed.
+const MEDIA_URL = 'https://api.x.com/2/media/upload';
+const MEDIA_CATEGORY = { image: 'tweet_image', gif: 'tweet_gif', video: 'tweet_video' };
+const CHUNK_BYTES = 4 * 1024 * 1024;
+
+async function multipartPost(url, fields, { file, fileField = 'media', filename = 'media', mime } = {}) {
+  const form = new FormData();
+  for (const [k, v] of Object.entries(fields)) form.append(k, String(v));
+  if (file) form.append(fileField, new Blob([file], { type: mime || 'application/octet-stream' }), filename);
+  const res = await fetch(url, { method: 'POST', headers: { Authorization: oauth1Header('POST', url) }, body: form });
+  const text = await res.text();
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    /* empty body on append */
+  }
+  if (!res.ok) {
+    const err = new Error(json?.detail || json?.title || `X media upload failed (${res.status})`);
+    err.response = { status: res.status, data: json || text };
+    throw err;
+  }
+  return json;
+}
+
+async function waitForProcessing(mediaId, info) {
+  let processing = info;
+  for (let i = 0; i < 30 && processing; i++) {
+    if (processing.state === 'succeeded') return;
+    if (processing.state === 'failed') throw new Error(processing.error?.message || 'X could not process the media');
+    await new Promise((resolve) => setTimeout(resolve, Math.max(1, processing.check_after_secs || 3) * 1000));
+    const params = { command: 'STATUS', media_id: mediaId };
+    const { data } = await axios.get(MEDIA_URL, {
+      params,
+      headers: { Authorization: oauth1Header('GET', MEDIA_URL, params) },
+      timeout: 15000,
+    });
+    processing = data.data?.processing_info;
+  }
+}
+
+// `m` is a downloaded media item: { buffer, mime, type: 'image'|'gif'|'video', name }.
+async function uploadMedia(m) {
+  const category = MEDIA_CATEGORY[m.type] || 'tweet_image';
+
+  if (m.type === 'image') {
+    const data = await multipartPost(MEDIA_URL, { media_category: category, media_type: m.mime }, { file: m.buffer, filename: m.name, mime: m.mime });
+    return String(data.data.id);
+  }
+
+  const init = await axios.post(
+    `${MEDIA_URL}/initialize`,
+    { media_type: m.mime, total_bytes: m.buffer.length, media_category: category },
+    { headers: { Authorization: oauth1Header('POST', `${MEDIA_URL}/initialize`), 'Content-Type': 'application/json' }, timeout: 30000 }
+  );
+  const mediaId = String(init.data.data.id);
+
+  for (let i = 0, segment = 0; i < m.buffer.length; i += CHUNK_BYTES, segment++) {
+    await multipartPost(
+      `${MEDIA_URL}/${mediaId}/append`,
+      { segment_index: segment },
+      { file: m.buffer.subarray(i, i + CHUNK_BYTES), filename: m.name, mime: m.mime }
+    );
+  }
+
+  const fin = await axios.post(`${MEDIA_URL}/${mediaId}/finalize`, null, {
+    headers: { Authorization: oauth1Header('POST', `${MEDIA_URL}/${mediaId}/finalize`) },
+    timeout: 30000,
+  });
+  await waitForProcessing(mediaId, fin.data?.data?.processing_info);
+  return mediaId;
+}
+
+// One entry point for calendar/scheduler posts: text, images/GIF/video, or a
+// whole thread (media rides on the first tweet).
+async function publish({ text = '', media = [], postType = 'post' } = {}) {
+  if (!canPost()) {
+    return {
+      status: 'skipped',
+      sample: true,
+      reason: 'Twitter posting needs TWITTER_API_KEY/SECRET + TWITTER_ACCESS_TOKEN/SECRET (OAuth 1.0a user context).',
+    };
+  }
+  const posted = [];
+  try {
+    const mediaIds = [];
+    for (const m of media) mediaIds.push(await uploadMedia(m));
+
+    const tweets = postType === 'thread' ? splitThread(text) : [text];
+    let replyToId;
+    for (let i = 0; i < tweets.length; i++) {
+      const tweet = await postTweet(tweets[i], { replyToId, mediaIds: i === 0 ? mediaIds : undefined });
+      posted.push(tweet.id);
+      replyToId = tweet.id;
+    }
+    return { status: 'success', externalPostId: posted[0], url: `https://x.com/i/status/${posted[0]}`, ids: posted };
+  } catch (e) {
+    logger.error('twitterService.publish failed', { error: e.response?.data || e.message });
+    // If part of a thread is already live, retrying from the top would
+    // duplicate it — flag it for a manual finish instead.
+    if (posted.length) {
+      return {
+        status: 'failed',
+        retriable: false,
+        externalPostId: posted[0],
+        url: `https://x.com/i/status/${posted[0]}`,
+        error: `Thread stopped after ${posted.length} tweet(s): ${e.message}. The posted part is live — finish the rest manually.`,
+      };
+    }
+    return { status: 'failed', error: upstreamMessage(e), retriable: e.retriable === true || isRetriable(e) };
   }
 }
 
@@ -152,4 +274,4 @@ async function getAnalytics() {
   }
 }
 
-module.exports = { features, canPost, postTweet, postThread, postReply, getDMs, getAnalytics };
+module.exports = { features, canPost, postTweet, postThread, postReply, publish, uploadMedia, getDMs, getAnalytics };

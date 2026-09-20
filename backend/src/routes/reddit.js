@@ -71,9 +71,15 @@ router.post('/schedule', asyncHandler(async (req, res) => {
     ai_generated: false,
     results: [],
     engagement: {},
-    raw: { subreddit, title },
+    raw: { media: [], variants: { reddit: { subreddit, title, text: text || '' } } },
   });
   ok(res, entry);
+}));
+
+// GET /api/reddit/subreddit/:name — rules, post-type restrictions and flairs,
+// so the composer can warn before Reddit rejects a post.
+router.get('/subreddit/:name', asyncHandler(async (req, res) => {
+  ok(res, await redditService.getSubredditInfo(req.params.name));
 }));
 
 router.get('/analytics', asyncHandler(async (req, res) => {

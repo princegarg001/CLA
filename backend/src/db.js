@@ -83,6 +83,23 @@ const jsonDriver = {
     writeDb(db);
     return true;
   },
+  // Compare-and-set: applies `patch` only if every key in `where` still
+  // matches, and returns the updated row — or null if someone else got there
+  // first. Lets the scheduler and manual publish buttons "claim" an entry so
+  // the same post can never be sent twice.
+  async claim(table, id, { where = {}, patch }) {
+    const db = readDb();
+    db[table] = db[table] || [];
+    const idx = db[table].findIndex((r) => r.id === id);
+    if (idx === -1) return null;
+    const row = db[table][idx];
+    for (const [key, value] of Object.entries(where)) {
+      if (row[key] !== value) return null;
+    }
+    db[table][idx] = { ...row, ...patch, updated_at: nowIso() };
+    writeDb(db);
+    return db[table][idx];
+  },
   async getSettings() {
     const db = readDb();
     return db.settings || {};
@@ -141,6 +158,15 @@ function buildSupabaseDriver() {
       if (error) throw error;
       return true;
     },
+    async claim(table, id, { where = {}, patch }) {
+      let query = client.from(table).update({ ...patch, updated_at: nowIso() }).eq('id', id);
+      for (const [key, value] of Object.entries(where)) {
+        query = query.eq(key, value);
+      }
+      const { data, error } = await query.select();
+      if (error) throw error;
+      return (data && data[0]) || null;
+    },
     async getSettings() {
       const { data, error } = await client.from('settings').select('key,value');
       if (error) throw error;
@@ -178,6 +204,7 @@ module.exports = {
   insert: (...args) => driver.insert(...args),
   update: (...args) => driver.update(...args),
   remove: (...args) => driver.remove(...args),
+  claim: (...args) => driver.claim(...args),
   getSettings: (...args) => driver.getSettings(...args),
   updateSettings: (...args) => driver.updateSettings(...args),
   // Legacy helpers kept for backwards compatibility with the original stub API.

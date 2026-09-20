@@ -9,7 +9,9 @@ async function run() {
   // Filter `locked` in JS rather than via the equality-match `filters` param —
   // that would exact-match `false`, which excludes older rows that predate the
   // `locked` column and read back as `undefined` rather than `false`.
-  const leads = (await db.list('leads', { filters: { status: 'new' } })).filter((l) => !l.locked);
+  // Recommendation-engine leads carry their own score (raw.rec), computed from the post itself;
+  // the generic company-size scorer would flatten it, so they're left alone.
+  const leads = (await db.list('leads', { filters: { status: 'new' } })).filter((l) => !l.locked && !l.raw?.rec);
   let rescored = 0;
   for (const lead of leads) {
     const { score } = await aiService.scoreLead(lead).catch(() => ({ score: lead.score }));

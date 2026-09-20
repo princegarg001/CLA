@@ -7,23 +7,89 @@ const facebookService = require('../services/facebookService');
 const twitterService = require('../services/twitterService');
 const redditService = require('../services/redditService');
 const storageService = require('../services/storageService');
+const aiService = require('../services/aiService');
+const rules = require('../services/socialRules');
 const config = require('../config');
 const db = require('../db');
 const { asyncHandler, ok, fail } = require('../utils/helpers');
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: rules.UPLOAD_MAX_BYTES },
+  fileFilter: (req, file, cb) => cb(null, !!rules.MEDIA_TYPES[file.mimetype]),
+});
 
-// POST /api/social/upload-image — hosts a picked photo publicly so a Facebook
-// photo post (which fetches the `url` param itself, no raw upload) can reach
-// it. The app calls this before /publish when an image is attached.
-router.post('/upload-image', upload.single('image'), asyncHandler(async (req, res) => {
+// Wraps multer so an oversized/unsupported file becomes a clear 4xx instead of
+// a generic 500.
+const uploadOne = (field) => (req, res, next) =>
+  upload.single(field)(req, res, (err) => {
+    if (err) return fail(res, err.code === 'LIMIT_FILE_SIZE' ? 413 : 400, err.code === 'LIMIT_FILE_SIZE'
+      ? `File is over the ${rules.UPLOAD_MAX_BYTES / 1048576}MB upload limit`
+      : err.message);
+    next();
+  });
+
+async function handleUpload(req, res) {
+  if (!req.file) return fail(res, 400, 'Attach a JPG, PNG, WebP, GIF, MP4 or MOV file.');
+  ok(res, await storageService.uploadMedia({
+    buffer: req.file.buffer,
+    filename: req.file.originalname || 'upload',
+    mimeType: req.file.mimetype,
+  }));
+}
+
+// POST /api/social/media — host an image or video so platforms can fetch it.
+// Returns { url, type, mime, size, name } — the shape calendar entries carry.
+router.post('/media', uploadOne('file'), asyncHandler(handleUpload));
+
+// Original image-only endpoint (multipart field "image"), same behavior.
+router.post('/upload-image', uploadOne('image'), asyncHandler(async (req, res) => {
   if (!req.file) return fail(res, 400, 'image file is required (multipart field name: "image")');
-  const url = await storageService.uploadImage({
+  const { url } = await storageService.uploadMedia({
     buffer: req.file.buffer,
     filename: req.file.originalname || 'upload.jpg',
     mimeType: req.file.mimetype,
   });
   ok(res, { url });
+}));
+
+router.get('/media', asyncHandler(async (req, res) => {
+  ok(res, await storageService.listMedia({ limit: req.query.limit ? Number(req.query.limit) : undefined }));
+}));
+
+router.delete('/media/:path', asyncHandler(async (req, res) => {
+  ok(res, await storageService.deleteMedia(req.params.path));
+}));
+
+// GET /api/social/limits — the same limits the server enforces, so the
+// composer's live counters can never disagree with what publishing accepts.
+router.get('/limits', (req, res) => ok(res, rules.publicLimits()));
+
+// POST /api/social/validate — dry-run a composition (no side effects).
+router.post('/validate', (req, res) => {
+  const { content, platforms, postType, media, variants } = req.body || {};
+  ok(res, rules.validateEntry({
+    content: content || '',
+    platforms: platforms || [],
+    post_type: postType || 'post',
+    raw: { media: media || [], variants: variants || {} },
+  }));
+});
+
+// POST /api/social/ai-variants — one idea/draft → a native version per platform,
+// written in the saved brand voice.
+router.post('/ai-variants', asyncHandler(async (req, res) => {
+  const { topic, baseText, platforms, subreddits } = req.body || {};
+  if (!topic && !baseText) return fail(res, 400, 'Give a topic or a draft to adapt');
+  if (!Array.isArray(platforms) || !platforms.length) return fail(res, 400, 'platforms must be a non-empty array');
+  const settings = await db.getSettings().catch(() => ({}));
+  ok(res, await aiService.generatePlatformVariants({
+    topic,
+    baseText,
+    platforms,
+    subreddits: Array.isArray(subreddits) && subreddits.length ? subreddits : config.redditMonitoredSubs,
+    voice: settings.brand_voice,
+  }));
 }));
 
 // GET /api/social/status — connection state for every platform the

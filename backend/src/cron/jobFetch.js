@@ -19,6 +19,7 @@ async function run() {
 
   let created = 0;
   for (const posting of postings) {
+    if (posting.sample) continue; // unconfigured-service placeholder data, never a real lead
     const company = (posting.company || '').toLowerCase();
     if (!company || existingCompanies.has(company)) continue;
     const candidate = {
@@ -33,6 +34,7 @@ async function run() {
   }
 
   for (const h of hiring) {
+    if (h.sample) continue;
     const company = (h.company || '').toLowerCase();
     if (!company || existingCompanies.has(company)) continue;
     const candidate = {

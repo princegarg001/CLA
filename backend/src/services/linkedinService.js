@@ -2,6 +2,7 @@ const axios = require('axios');
 const config = require('../config');
 const db = require('../db');
 const logger = require('../utils/logger');
+const { isRetriable, upstreamMessage } = require('../utils/http');
 
 // Posting to your OWN profile only needs LinkedIn's self-serve "Share on
 // LinkedIn" product (openid + profile + w_member_social scopes) — no
@@ -76,12 +77,24 @@ async function isConnected() {
   return !!conn;
 }
 
+function daysUntil(iso) {
+  if (!iso) return null;
+  return Math.floor((new Date(iso).getTime() - Date.now()) / 86400000);
+}
+
+// Self-serve LinkedIn tokens last ~60 days and can't be refreshed, so the
+// only fix for an expiring one is reconnecting — surface how long is left so
+// the UI can warn before scheduled posts start failing.
 async function status() {
   const conn = await getRawConnection();
+  const daysLeft = conn ? daysUntil(conn.expires_at) : null;
   return {
     appConfigured: isAppConfigured(),
     connected: !!conn,
     accountName: conn?.external_account_name || null,
+    expiresAt: conn?.expires_at || null,
+    daysLeft,
+    expired: daysLeft !== null && daysLeft < 0,
   };
 }
 
@@ -91,38 +104,115 @@ async function disconnect() {
   return { connected: false };
 }
 
-async function postText(text) {
+const ASSETS_URL = 'https://api.linkedin.com/v2/assets';
+const RECIPES = { image: 'urn:li:digitalmediaRecipe:feedshare-image', video: 'urn:li:digitalmediaRecipe:feedshare-video' };
+
+function authHeaders(conn, extra = {}) {
+  return { Authorization: `Bearer ${conn.access_token}`, 'X-Restli-Protocol-Version': '2.0.0', ...extra };
+}
+
+// Two-step media upload: ask LinkedIn for an upload URL + asset URN, then PUT
+// the raw bytes there. The asset URN is what the post itself references.
+async function uploadAsset(conn, { buffer, mime, kind }) {
+  const { data } = await axios.post(
+    `${ASSETS_URL}?action=registerUpload`,
+    {
+      registerUploadRequest: {
+        recipes: [RECIPES[kind]],
+        owner: `urn:li:person:${conn.external_account_id}`,
+        serviceRelationships: [{ relationshipType: 'OWNER', identifier: 'urn:li:userGeneratedContent' }],
+      },
+    },
+    { headers: authHeaders(conn, { 'Content-Type': 'application/json' }), timeout: 30000 }
+  );
+  const uploadUrl = data.value?.uploadMechanism?.['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']?.uploadUrl;
+  const asset = data.value?.asset;
+  if (!uploadUrl || !asset) throw new Error('LinkedIn did not return an upload URL');
+
+  await axios.put(uploadUrl, buffer, {
+    headers: { Authorization: `Bearer ${conn.access_token}`, 'Content-Type': mime || 'application/octet-stream' },
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity,
+    timeout: 120000,
+  });
+  return asset;
+}
+
+// Videos are transcoded after upload; posting before that finishes fails.
+async function waitForAsset(conn, assetUrn, { attempts = 12, delayMs = 5000 } = {}) {
+  const id = assetUrn.split(':').pop();
+  for (let i = 0; i < attempts; i++) {
+    const { data } = await axios.get(`${ASSETS_URL}/${id}`, { headers: authHeaders(conn), timeout: 15000 });
+    const state = data.recipes?.[0]?.status;
+    if (state === 'AVAILABLE') return true;
+    if (state === 'CLIENT_ERROR' || state === 'SERVER_ERROR') throw new Error(`LinkedIn could not process the video (${state})`);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  throw Object.assign(new Error('LinkedIn is still processing the video — try again in a few minutes'), { retriable: true });
+}
+
+// text-only, image(s), one video, or a link preview — LinkedIn allows exactly
+// one of those per post. `media` items carry a downloaded `buffer`.
+async function publish({ text = '', media = [], linkUrl } = {}) {
   const conn = await getRawConnection();
   if (!conn) {
     return { status: 'skipped', reason: 'LinkedIn not connected — go to Settings to connect it.', sample: true };
   }
+  if (conn.expires_at && new Date(conn.expires_at).getTime() < Date.now()) {
+    return { status: 'failed', retriable: false, error: 'LinkedIn access expired — reconnect it in Settings → Connected Accounts.' };
+  }
+
   try {
+    let category = 'NONE';
+    let mediaBlock;
+
+    const video = media.find((m) => m.type === 'video');
+    const images = media.filter((m) => m.type === 'image' || m.type === 'gif');
+
+    if (video) {
+      const asset = await uploadAsset(conn, { buffer: video.buffer, mime: video.mime, kind: 'video' });
+      await waitForAsset(conn, asset);
+      category = 'VIDEO';
+      mediaBlock = [{ status: 'READY', media: asset }];
+    } else if (images.length) {
+      const assets = [];
+      for (const img of images) {
+        assets.push(await uploadAsset(conn, { buffer: img.buffer, mime: img.mime, kind: 'image' }));
+      }
+      category = 'IMAGE';
+      mediaBlock = assets.map((asset) => ({ status: 'READY', media: asset }));
+    } else if (linkUrl) {
+      category = 'ARTICLE';
+      mediaBlock = [{ status: 'READY', originalUrl: linkUrl }];
+    }
+
+    const shareContent = { shareCommentary: { text }, shareMediaCategory: category };
+    if (mediaBlock) shareContent.media = mediaBlock;
+
     const { data } = await axios.post(
       UGC_POSTS_URL,
       {
         author: `urn:li:person:${conn.external_account_id}`,
         lifecycleState: 'PUBLISHED',
-        specificContent: {
-          'com.linkedin.ugc.ShareContent': {
-            shareCommentary: { text },
-            shareMediaCategory: 'NONE',
-          },
-        },
+        specificContent: { 'com.linkedin.ugc.ShareContent': shareContent },
         visibility: { 'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC' },
       },
-      {
-        headers: {
-          Authorization: `Bearer ${conn.access_token}`,
-          'X-Restli-Protocol-Version': '2.0.0',
-          'Content-Type': 'application/json',
-        },
-      }
+      { headers: authHeaders(conn, { 'Content-Type': 'application/json' }), timeout: 30000 }
     );
-    return { status: 'success', externalPostId: data.id || null };
+    return {
+      status: 'success',
+      externalPostId: data.id || null,
+      url: data.id ? `https://www.linkedin.com/feed/update/${data.id}/` : null,
+    };
   } catch (e) {
-    logger.error('linkedinService.postText failed', { error: e.response?.data || e.message });
-    return { status: 'failed', error: e.response?.data?.message || e.message };
+    logger.error('linkedinService.publish failed', { error: e.response?.data || e.message });
+    return { status: 'failed', error: upstreamMessage(e), retriable: e.retriable === true || isRetriable(e) };
   }
 }
 
-module.exports = { isAppConfigured, getAuthUrl, handleCallback, isConnected, status, disconnect, postText };
+// Original text-only entry point (used by the legacy publish route).
+function postText(text) {
+  return publish({ text });
+}
+
+module.exports = { isAppConfigured, getAuthUrl, handleCallback, isConnected, status, disconnect, publish, postText };

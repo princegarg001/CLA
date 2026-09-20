@@ -55,6 +55,7 @@ api.use('/calendar', require('./routes/calendar'));
 api.use('/upwork', require('./routes/upwork'));
 api.use('/clients', require('./routes/clients'));
 api.use('/notifications', require('./routes/notifications'));
+api.use('/recommendations', require('./routes/recommendations'));
 app.use('/api', api);
 
 app.use(notFoundHandler);

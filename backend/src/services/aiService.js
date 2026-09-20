@@ -132,43 +132,103 @@ async function weeklyStrategicInsight(metrics) {
   );
 }
 
-const FALLBACK_WEEK_PLAN = [
-  { platform: 'twitter', postType: 'thread', dayOffset: 1, content: 'Hook: The hidden cost of skipping backend architecture reviews.\n\nBody 1...\nBody 2...\n\nCTA: DM me if this is you.' },
-  { platform: 'twitter', postType: 'thread', dayOffset: 3, content: 'Hook: Why most MVPs outgrow their backend in under 6 months.\n\nBody 1...\nBody 2...\n\nCTA: Let\'s talk if you\'re hitting this.' },
-  { platform: 'linkedin', postType: 'post', dayOffset: 2, content: 'A short thought-leadership post on backend reliability for funded startups. [AI unavailable — draft manually]' },
-  { platform: 'reddit', postType: 'post', dayOffset: 4, content: 'An educational, value-first post for r/SaaS or r/startups. [AI unavailable — draft manually]' },
-  { platform: 'facebook', postType: 'post', dayOffset: 5, content: 'A short update-style post: what shipped this week and why it matters for founders evaluating backend partners. [AI unavailable — draft manually]' },
-];
+function voiceClause(voice) {
+  return voice && String(voice).trim()
+    ? ` Write in this author's voice — match its tone, sentence length and vocabulary:\n"""\n${String(voice).trim().slice(0, 2500)}\n"""`
+    : '';
+}
 
 // Workflow 2 ("The Publisher"): given last week's per-platform engagement,
-// generate 5 content pieces for the coming week — 2 Twitter threads, 1
-// LinkedIn post, 1 Reddit post, 1 Facebook post — per the fixed content
-// mix in the plan. Returns an array even on AI failure (a manual-draft
-// fallback set) so the calendar always gets filled with *something* to edit.
-async function generateWeeklyContentPlan(engagement) {
+// plan 5 pieces for the coming week — 2 Twitter threads, 2 LinkedIn posts,
+// 1 Reddit post. Returns [] when AI is unavailable: an empty week is honest,
+// whereas placeholder drafts ("Body 1...") are one tap from being published.
+async function generateWeeklyContentPlan(engagement, { voice } = {}) {
   const text = await safeComplete(
     {
       system:
         'You are a content strategist for AlphoTech, a backend engineering/automation studio for funded startups. ' +
-        'Given last week\'s engagement metrics across Twitter, LinkedIn, Reddit and Facebook, plan exactly 5 content pieces for ' +
-        'the coming week: 2 Twitter threads, 1 LinkedIn post, 1 Reddit post (educational, value-first, no self-promotion), ' +
-        '1 Facebook Page post. Base topics on what performed best last week when the data suggests something. ' +
-        'Respond with ONLY a JSON object: {"items": [{"platform": "twitter|linkedin|reddit|facebook", ' +
-        '"postType": "thread|post", "dayOffset": <1-7, days from today>, "content": "<the actual copy; ' +
-        'for a thread separate tweets with a blank line>"}]} — exactly 5 items.',
+        "Given last week's engagement metrics across Twitter, LinkedIn and Reddit, plan exactly 5 content pieces for " +
+        'the coming week: 2 Twitter threads, 2 LinkedIn posts, 1 Reddit post (educational, value-first, no self-promotion). ' +
+        'Base topics on what performed best last week when the data suggests something. Every piece must be complete, ' +
+        'publishable copy — never placeholders or outlines. ' +
+        'Respond with ONLY a JSON object: {"items": [{"platform": "twitter|linkedin|reddit", ' +
+        '"postType": "thread|post", "dayOffset": <1-7, days from today>, "title": "<reddit only: the post title>", ' +
+        '"content": "<the actual copy; for a thread separate tweets with a blank line, each under 280 characters>"}]} — exactly 5 items.' +
+        voiceClause(voice),
       prompt: JSON.stringify(engagement || {}),
       json: true,
-      maxTokens: 1400,
+      maxTokens: 2000,
     },
     null
   );
-  if (!text) return FALLBACK_WEEK_PLAN;
+  if (!text) return [];
   try {
     const parsed = JSON.parse(text);
-    const items = Array.isArray(parsed.items) ? parsed.items : [];
-    return items.length ? items : FALLBACK_WEEK_PLAN;
+    return Array.isArray(parsed.items) ? parsed.items : [];
   } catch {
-    return FALLBACK_WEEK_PLAN;
+    return [];
+  }
+}
+
+// Cut at the last sentence/word boundary that fits, never mid-word.
+function smartTruncate(text, max) {
+  const t = String(text || '').trim();
+  if (Array.from(t).length <= max) return t;
+  const chars = Array.from(t).slice(0, max - 1).join('');
+  const cut = Math.max(chars.lastIndexOf('. '), chars.lastIndexOf('! '), chars.lastIndexOf('? '));
+  if (cut > max * 0.5) return chars.slice(0, cut + 1);
+  const space = chars.lastIndexOf(' ');
+  return `${chars.slice(0, space > 0 ? space : chars.length).trim()}…`;
+}
+
+// Compose once → a tailored version per platform. `baseText` (a rough draft)
+// and/or `topic` (an idea) go in; each requested platform gets copy that fits
+// its norms and hard limits. Falls back to mechanical trimming if AI is down
+// so the composer still fills in something sensible.
+async function generatePlatformVariants({ topic, baseText, platforms = [], subreddits = [], voice } = {}) {
+  const fallback = () => {
+    const src = String(baseText || topic || '').trim();
+    const out = {};
+    for (const p of platforms) {
+      if (p === 'twitter') out.twitter = { text: smartTruncate(src, 280) };
+      else if (p === 'linkedin') out.linkedin = { text: src };
+      else if (p === 'reddit') {
+        const [first, ...rest] = src.split(/\n+/);
+        out.reddit = { title: smartTruncate(first, 300), text: rest.join('\n').trim(), subreddit: subreddits[0] || '' };
+      } else out[p] = { text: src };
+    }
+    return out;
+  };
+
+  const text = await safeComplete(
+    {
+      system:
+        'You adapt one idea into platform-native posts for AlphoTech, a backend engineering/automation studio founder. ' +
+        'Rules: TWITTER — one tweet, hard max 270 characters, punchy, no hashtags spam (0-1 max). ' +
+        'LINKEDIN — 600-1300 characters, a strong first line hook, short paragraphs, a soft closing question, at most 3 hashtags at the end. ' +
+        'REDDIT — genuinely useful and specific, no marketing tone, no links unless essential; give a "title" (max 300 chars, descriptive, not clickbait) and a "text" body (self post); pick the best "subreddit" from the provided list. ' +
+        'Never invent statistics, clients or claims. ' +
+        'Respond with ONLY JSON: {"twitter": {"text": ""}, "linkedin": {"text": ""}, "reddit": {"title": "", "text": "", "subreddit": ""}} ' +
+        `including only these platforms: ${platforms.join(', ')}.` +
+        voiceClause(voice),
+      prompt: JSON.stringify({ topic: topic || null, draft: baseText || null, subreddits }),
+      json: true,
+      maxTokens: 1600,
+    },
+    null
+  );
+  if (!text) return { variants: fallback(), ai: false };
+  try {
+    const parsed = JSON.parse(text);
+    const variants = {};
+    for (const p of platforms) {
+      if (parsed[p]) variants[p] = parsed[p];
+    }
+    if (variants.twitter) variants.twitter.text = smartTruncate(variants.twitter.text, 280);
+    if (variants.reddit && !variants.reddit.subreddit) variants.reddit.subreddit = subreddits[0] || '';
+    return { variants: Object.keys(variants).length ? variants : fallback(), ai: Object.keys(variants).length > 0 };
+  } catch {
+    return { variants: fallback(), ai: false };
   }
 }
 
@@ -182,4 +242,6 @@ module.exports = {
   generateTwitterThread,
   weeklyStrategicInsight,
   generateWeeklyContentPlan,
+  generatePlatformVariants,
+  smartTruncate,
 };

@@ -37,7 +37,7 @@ export interface OutreachThread {
 }
 
 export interface MailStatus {
-  smtp: { configured: boolean; from: string | null };
+  smtp: { configured: boolean; from: string | null; via?: string };
   imap: { configured: boolean; host: string | null };
 }
 
@@ -51,7 +51,7 @@ export interface OutreachOverview {
 }
 
 export interface VerifyResult {
-  smtp: { configured: boolean; ok: boolean; error: string | null };
+  smtp: { configured: boolean; ok: boolean; error: string | null; via?: string };
   imap: { configured: boolean; ok: boolean; error: string | null };
 }
 
@@ -82,7 +82,7 @@ export function useGenerateDraft() {
   const refresh = useRefresh();
   return useMutation({
     mutationFn: (body: { leadId: string; tone: string; market: string; channel: string; templateId?: string }) => api.post<OutreachMessage>('/outreach/generate', body),
-    onSuccess: refresh,
+    onSettled: refresh,
   });
 }
 
@@ -90,7 +90,7 @@ export function useSaveDraft() {
   const refresh = useRefresh();
   return useMutation({
     mutationFn: (body: { leadId?: string; channel: string; subject?: string; body: string; to?: string }) => api.post<OutreachMessage>('/outreach/messages', body),
-    onSuccess: refresh,
+    onSettled: refresh,
   });
 }
 
@@ -98,7 +98,7 @@ export function useUpdateMessage() {
   const refresh = useRefresh();
   return useMutation({
     mutationFn: ({ id, ...patch }: { id: string; subject?: string; body?: string; to?: string; channel?: string }) => api.patch<OutreachMessage>(`/outreach/messages/${id}`, patch),
-    onSuccess: refresh,
+    onSettled: refresh,
   });
 }
 
@@ -106,7 +106,7 @@ export function useSendMessage() {
   const refresh = useRefresh();
   return useMutation({
     mutationFn: ({ id, force }: { id: string; force?: boolean }) => api.post<{ message: OutreachMessage; warnings: string[] }>(`/outreach/messages/${id}/send`, { force: !!force }),
-    onSuccess: refresh,
+    onSettled: refresh,
   });
 }
 
@@ -114,39 +114,39 @@ export function useSendFromLead() {
   const refresh = useRefresh();
   return useMutation({
     mutationFn: (b: { leadId: string; subject: string; body: string; send: boolean; force?: boolean }) => api.post<{ message: OutreachMessage }>('/outreach/from-lead', b),
-    onSuccess: refresh,
+    onSettled: refresh,
   });
 }
 
 export function useMarkSent() {
   const refresh = useRefresh();
-  return useMutation({ mutationFn: (id: string) => api.post<OutreachMessage>(`/outreach/messages/${id}/mark-sent`), onSuccess: refresh });
+  return useMutation({ mutationFn: (id: string) => api.post<OutreachMessage>(`/outreach/messages/${id}/mark-sent`), onSettled: refresh });
 }
 
 export function useRecordReply() {
   const refresh = useRefresh();
   return useMutation({
     mutationFn: ({ id, text }: { id: string; text?: string }) => api.post<OutreachMessage>(`/outreach/messages/${id}/replied`, { text }),
-    onSuccess: refresh,
+    onSettled: refresh,
   });
 }
 
 export function useDeleteMessage() {
   const refresh = useRefresh();
-  return useMutation({ mutationFn: (id: string) => api.del<{ id: string }>(`/outreach/messages/${id}`), onSuccess: refresh });
+  return useMutation({ mutationFn: (id: string) => api.del<{ id: string }>(`/outreach/messages/${id}`), onSettled: refresh });
 }
 
 export function useSyncReplies() {
   const refresh = useRefresh();
   return useMutation({
     mutationFn: () => api.post<{ skipped?: string; checked?: number; replies?: number; bounces?: number; unsubscribes?: number }>('/outreach/sync'),
-    onSuccess: refresh,
+    onSettled: refresh,
   });
 }
 
 export function useRunFollowups() {
   const refresh = useRefresh();
-  return useMutation({ mutationFn: () => api.post<{ due: number; drafted: number; sent: number }>('/outreach/followups/run'), onSuccess: refresh });
+  return useMutation({ mutationFn: () => api.post<{ due: number; drafted: number; sent: number }>('/outreach/followups/run'), onSettled: refresh });
 }
 
 export function useVerifyEmail() {
@@ -155,7 +155,7 @@ export function useVerifyEmail() {
 
 export function useSaveOutreachSettings() {
   const refresh = useRefresh();
-  return useMutation({ mutationFn: (patch: Partial<OutreachSettings>) => api.put<OutreachSettings>('/outreach/settings', patch), onSuccess: refresh });
+  return useMutation({ mutationFn: (patch: Partial<OutreachSettings>) => api.put<OutreachSettings>('/outreach/settings', patch), onSettled: refresh });
 }
 
 export function useSaveTemplate() {
@@ -163,13 +163,13 @@ export function useSaveTemplate() {
   return useMutation({
     mutationFn: ({ id, ...body }: { id?: string; name: string; category?: string; tone?: string; market?: string; body: string }) =>
       id ? api.put<MessageTemplate>(`/outreach/templates/${id}`, body) : api.post<MessageTemplate>('/outreach/templates', body),
-    onSuccess: refresh,
+    onSettled: refresh,
   });
 }
 
 export function useDeleteTemplate() {
   const refresh = useRefresh();
-  return useMutation({ mutationFn: (id: string) => api.del<{ id: string }>(`/outreach/templates/${id}`), onSuccess: refresh });
+  return useMutation({ mutationFn: (id: string) => api.del<{ id: string }>(`/outreach/templates/${id}`), onSettled: refresh });
 }
 
 export function useSuppressed() {
@@ -178,5 +178,5 @@ export function useSuppressed() {
 
 export function useUnsuppress() {
   const refresh = useRefresh();
-  return useMutation({ mutationFn: (email: string) => api.del<string[]>(`/outreach/suppressed/${encodeURIComponent(email)}`), onSuccess: refresh });
+  return useMutation({ mutationFn: (email: string) => api.del<string[]>(`/outreach/suppressed/${encodeURIComponent(email)}`), onSettled: refresh });
 }

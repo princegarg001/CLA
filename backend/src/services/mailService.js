@@ -19,6 +19,21 @@ function smtpConfigured() {
   return config.isConfigured('smtp');
 }
 
+// Which way mail leaves: an HTTPS email API when a key is set (works where SMTP ports are
+// blocked, e.g. Render's free plan), otherwise plain SMTP.
+function apiProvider() {
+  if (config.resendApiKey) return 'resend';
+  if (config.brevoApiKey) return 'brevo';
+  return null;
+}
+
+const fromAddress = () => config.mailFrom || config.smtpUser;
+
+// True when a message can actually be sent right now.
+function canSend() {
+  return !!(fromAddress() && (apiProvider() || smtpConfigured()));
+}
+
 function imapSettings() {
   return {
     host: config.imapHost || guessImapHost(config.smtpHost),
@@ -33,8 +48,8 @@ function imapConfigured() {
   return !!(s.host && s.user && s.pass);
 }
 
-const fromAddress = () => config.smtpUser;
-const fromHeader = () => (config.smtpFromName ? `"${config.smtpFromName.replace(/"/g, '')}" <${config.smtpUser}>` : config.smtpUser);
+const fromName = () => (config.smtpFromName || '').replace(/["<>\r\n]/g, '');
+const fromHeader = () => (fromName() ? `"${fromName()}" <${fromAddress()}>` : fromAddress());
 
 // ---- sending --------------------------------------------------------------------
 
@@ -58,14 +73,63 @@ function getTransporter() {
 const EMAIL_RE = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]{2,}$/;
 const isEmail = (v) => EMAIL_RE.test(String(v || '').trim());
 
+async function callApi(url, { method = 'POST', headers = {}, body } = {}) {
+  const res = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(20000),
+  });
+  let json = null;
+  try {
+    json = await res.json();
+  } catch {
+    /* empty or non-JSON body */
+  }
+  return { ok: res.ok, status: res.status, json };
+}
+
+function apiError(provider, r) {
+  const detail = (r.json && (r.json.message || r.json.error || r.json.code)) || `HTTP ${r.status}`;
+  if (r.status === 401 || r.status === 403) return `${provider} rejected the API key (${detail}). Check ${provider === 'Resend' ? 'RESEND_API_KEY' : 'BREVO_API_KEY'} and that your sending domain or address is verified there.`;
+  if (r.status === 422 || r.status === 400) return `${provider} refused the message: ${detail}. Make sure ${fromAddress()} is a verified sender in ${provider}.`;
+  return `${provider} error: ${detail}`;
+}
+
+async function sendViaApi({ to, subject, text, inReplyTo, references, messageId }) {
+  const headers = { 'List-Unsubscribe': `<mailto:${fromAddress()}?subject=unsubscribe>` };
+  if (inReplyTo) headers['In-Reply-To'] = inReplyTo;
+  if (references && references.length) headers.References = references.join(' ');
+
+  if (apiProvider() === 'resend') {
+    const r = await callApi('https://api.resend.com/emails', {
+      headers: { Authorization: `Bearer ${config.resendApiKey}` },
+      body: { from: fromHeader(), to: [to], subject, text, reply_to: fromAddress(), headers },
+    });
+    if (!r.ok) throw Object.assign(new Error(apiError('Resend', r)), { status: 502 });
+    return { messageId: (r.json && r.json.id) || messageId };
+  }
+  const r = await callApi('https://api.brevo.com/v3/smtp/email', {
+    headers: { 'api-key': config.brevoApiKey, accept: 'application/json' },
+    body: { sender: { name: fromName() || undefined, email: fromAddress() }, to: [{ email: to }], subject, textContent: text, replyTo: { email: fromAddress() }, headers },
+  });
+  if (!r.ok) throw Object.assign(new Error(apiError('Brevo', r)), { status: 502 });
+  return { messageId: (r.json && r.json.messageId) || messageId };
+}
+
 // Sends one plain-text email. The Message-ID is created here (not by the server) so it is
-// known before delivery and can be matched against replies later.
+// known before delivery and can be matched against replies later. When an email API is used the
+// provider assigns its own header, so replies are matched by sender address instead.
 async function send({ to, subject, text, inReplyTo, references }) {
-  if (!smtpConfigured()) throw Object.assign(new Error('Email is not set up. Add SMTP_HOST, SMTP_USER and SMTP_PASS on the server.'), { status: 503 });
+  if (!canSend()) throw Object.assign(new Error('Email is not set up. Add RESEND_API_KEY (or SMTP_HOST, SMTP_USER and SMTP_PASS) on the server.'), { status: 503 });
   if (!isEmail(to)) throw Object.assign(new Error(`"${to}" is not a valid email address`), { status: 400 });
-  const domain = (config.smtpUser.split('@')[1] || 'localhost').toLowerCase();
+  const domain = (fromAddress().split('@')[1] || 'localhost').toLowerCase();
   const messageId = `<${randomUUID()}@${domain}>`;
   try {
+    if (apiProvider()) {
+      const out = await sendViaApi({ to, subject, text, inReplyTo, references, messageId });
+      return { messageId, providerId: out.messageId, accepted: [to] };
+    }
     const info = await getTransporter().sendMail({
       from: fromHeader(),
       to,
@@ -87,7 +151,12 @@ async function send({ to, subject, text, inReplyTo, references }) {
 function friendlySmtpError(e) {
   const m = String(e.message || e);
   if (/535|Invalid login|Username and Password not accepted|AUTH/i.test(m)) return 'The mailbox rejected the login. For Gmail use an App Password, not your normal password.';
-  if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ESOCKET/i.test(m)) return `Could not reach the mail server (${config.smtpHost}:${config.smtpPort}). Check SMTP_HOST and SMTP_PORT.`;
+  if (/^(ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ECONNECTION|ESOCKET|EDNS)$/.test(e.code || '') || /ENOTFOUND|ECONNREFUSED|ETIMEDOUT|timeout/i.test(m)) {
+    const where = `${config.smtpHost}:${config.smtpPort}`;
+    // Render's free plan blocks outbound SMTP (25, 465, 587), which looks exactly like a timeout.
+    if (process.env.RENDER) return `Could not connect to the mail server (${where}). Render's free plan blocks outbound email ports 25, 465 and 587. Send through an email API instead: set RESEND_API_KEY on Render.`;
+    return `Could not reach the mail server (${where}). Check SMTP_HOST and SMTP_PORT.`;
+  }
   return m;
 }
 
@@ -177,10 +246,24 @@ async function fetchInbound({ since, limit = 200 } = {}) {
 // Checks the two connections separately so the setup screen can say which one is wrong.
 async function verify() {
   const result = {
-    smtp: { configured: smtpConfigured(), ok: false, error: null },
+    smtp: { configured: canSend(), ok: false, error: null, via: apiProvider() || 'smtp' },
     imap: { configured: imapConfigured(), ok: false, error: null },
   };
-  if (result.smtp.configured) {
+  if (result.smtp.configured && apiProvider()) {
+    // Checks the key without sending anything. A "restricted" Resend key cannot list domains, which
+    // still proves the key is valid, so that particular refusal counts as OK.
+    try {
+      const r =
+        apiProvider() === 'resend'
+          ? await callApi('https://api.resend.com/domains', { method: 'GET', headers: { Authorization: `Bearer ${config.resendApiKey}` } })
+          : await callApi('https://api.brevo.com/v3/account', { method: 'GET', headers: { 'api-key': config.brevoApiKey, accept: 'application/json' } });
+      const restricted = r.status === 401 && r.json && r.json.name === 'restricted_api_key';
+      if (r.ok || restricted) result.smtp.ok = true;
+      else result.smtp.error = apiError(apiProvider() === 'resend' ? 'Resend' : 'Brevo', r);
+    } catch (e) {
+      result.smtp.error = `Could not reach the email service: ${e.message}`;
+    }
+  } else if (result.smtp.configured) {
     try {
       transporter = null;
       await getTransporter().verify();
@@ -209,9 +292,9 @@ async function verify() {
 
 function status() {
   return {
-    smtp: { configured: smtpConfigured(), from: smtpConfigured() ? fromAddress() : null },
+    smtp: { configured: canSend(), from: canSend() ? fromAddress() : null, via: apiProvider() || 'smtp' },
     imap: { configured: imapConfigured(), host: imapConfigured() ? imapSettings().host : null },
   };
 }
 
-module.exports = { send, fetchInbound, verify, status, smtpConfigured, imapConfigured, isEmail, stripQuoted, classifyInbound, bouncedRecipient, guessImapHost, fromAddress };
+module.exports = { friendlySmtpError, apiProvider, canSend, send, fetchInbound, verify, status, smtpConfigured, imapConfigured, isEmail, stripQuoted, classifyInbound, bouncedRecipient, guessImapHost, fromAddress };

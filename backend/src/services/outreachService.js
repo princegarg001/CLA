@@ -440,7 +440,7 @@ async function runFollowups({ now = Date.now() } = {}) {
     });
     await db.update('messages', m.id, { meta: { ...mm, nextFollowupAt: null } });
     drafted += 1;
-    if (isEmail && settings.autoSendFollowups && mailService.smtpConfigured() && inSendWindow(now)) {
+    if (isEmail && settings.autoSendFollowups && mailService.canSend() && inSendWindow(now)) {
       try {
         await sendMessage(draft.id, { now });
         sent += 1;

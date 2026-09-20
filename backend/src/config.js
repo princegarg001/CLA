@@ -86,6 +86,11 @@ const config = {
   // Outreach: the same mailbox sends (SMTP) and is read for replies (IMAP). Gmail needs an
   // App Password for both. IMAP falls back to the SMTP login when not set separately.
   smtpFromName: process.env.SMTP_FROM_NAME || '',
+  // Hosts like Render block outbound SMTP on their free plan; an email API works over HTTPS instead.
+  // Set ONE of these to send through it (replies are still read from the mailbox over IMAP).
+  resendApiKey: process.env.RESEND_API_KEY || '',
+  brevoApiKey: process.env.BREVO_API_KEY || '',
+  mailFrom: process.env.MAIL_FROM || '', // optional; defaults to SMTP_USER
   imapHost: process.env.IMAP_HOST || '',
   imapPort: parseInt(process.env.IMAP_PORT || '993', 10),
   imapUser: process.env.IMAP_USER || '',

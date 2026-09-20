@@ -137,7 +137,7 @@ function fakeDb(t, { leads = [], messages = [], settings = {}, templates = [] } 
   t.mock.method(db, 'updateSettings', async (p) => Object.assign(store.settings, p));
   t.mock.method(aiService, 'safeComplete', async (_a, fb) => fb);
   t.mock.method(notificationService, 'sendPush', async () => ({}));
-  t.mock.method(mailService, 'smtpConfigured', () => true);
+  t.mock.method(mailService, 'canSend', () => true);
   return store;
 }
 
@@ -330,4 +330,77 @@ test('IMAP host is derived for the common providers, including GoDaddy', () => {
   assert.equal(g('smtpout.secureserver.net'), 'imap.secureserver.net');
   assert.equal(g('smtp.office365.com'), 'outlook.office365.com');
   assert.equal(g('smtp.zoho.com'), 'imap.zoho.com');
+});
+
+test('a connection timeout is explained, and on Render it names the blocked SMTP ports', () => {
+  const err = Object.assign(new Error('Connection timeout'), { code: 'ETIMEDOUT' });
+  const before = process.env.RENDER;
+  delete process.env.RENDER;
+  assert.match(mailService.friendlySmtpError(err), /Could not reach the mail server/);
+  process.env.RENDER = 'true';
+  assert.match(mailService.friendlySmtpError(err), /free plan blocks outbound email ports/);
+  if (before === undefined) delete process.env.RENDER; else process.env.RENDER = before;
+  assert.match(mailService.friendlySmtpError(new Error('535 Authentication failed')), /rejected the login/);
+});
+
+test('with an email API key, mail is sent over HTTPS (not SMTP) and the request is well formed', async (t) => {
+  config.resendApiKey = 're_test';
+  config.smtpFromName = 'Prince from AlphoTech';
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    calls.push({ url, init, body: JSON.parse(init.body) });
+    return { ok: true, status: 200, json: async () => ({ id: 'resend-123' }) };
+  });
+  try {
+    assert.equal(mailService.apiProvider(), 'resend');
+    assert.equal(mailService.canSend(), true);
+    const r = await mailService.send({ to: 'dana@acme.io', subject: 'Quick idea', text: 'Hello', inReplyTo: '<a@x>', references: ['<a@x>'] });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://api.resend.com/emails');
+    assert.equal(calls[0].init.headers.Authorization, 'Bearer re_test');
+    const b = calls[0].body;
+    assert.equal(b.from, '"Prince from AlphoTech" <me@alphotech.com>');
+    assert.deepEqual(b.to, ['dana@acme.io']);
+    assert.equal(b.reply_to, 'me@alphotech.com', 'replies come back to the mailbox that is read over IMAP');
+    assert.match(b.headers['List-Unsubscribe'], /unsubscribe/);
+    assert.equal(b.headers['In-Reply-To'], '<a@x>');
+    assert.equal(r.providerId, 'resend-123');
+    assert.match(r.messageId, /^<.+@alphotech\.com>$/);
+  } finally {
+    config.resendApiKey = '';
+    config.smtpFromName = '';
+  }
+});
+
+test('email API failures are explained in plain words', async (t) => {
+  config.resendApiKey = 're_bad';
+  t.mock.method(globalThis, 'fetch', async () => ({ ok: false, status: 403, json: async () => ({ message: 'The alphotech.com domain is not verified' }) }));
+  try {
+    await assert.rejects(mailService.send({ to: 'dana@acme.io', subject: 's', text: 't' }), /Resend rejected the API key.*not verified/s);
+    t.mock.restoreAll();
+    t.mock.method(globalThis, 'fetch', async () => ({ ok: false, status: 422, json: async () => ({ message: 'Invalid from address' }) }));
+    await assert.rejects(mailService.send({ to: 'dana@acme.io', subject: 's', text: 't' }), /verified sender/);
+  } finally {
+    config.resendApiKey = '';
+  }
+});
+
+test('Brevo is used when only its key is set, and verify() checks the key without sending', async (t) => {
+  config.brevoApiKey = 'xkeysib-test';
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    calls.push({ url, method: init.method });
+    return { ok: true, status: 200, json: async () => ({ messageId: '<brevo@x>', email: 'me@alphotech.com' }) };
+  });
+  try {
+    assert.equal(mailService.apiProvider(), 'brevo');
+    const v = await mailService.verify();
+    assert.equal(v.smtp.ok, true);
+    assert.equal(v.smtp.via, 'brevo');
+    assert.deepEqual(calls.map((c) => `${c.method} ${c.url}`), ['GET https://api.brevo.com/v3/account']);
+    await mailService.send({ to: 'dana@acme.io', subject: 's', text: 't' });
+    assert.equal(calls[1].url, 'https://api.brevo.com/v3/smtp/email');
+  } finally {
+    config.brevoApiKey = '';
+  }
 });

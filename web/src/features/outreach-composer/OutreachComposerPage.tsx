@@ -394,8 +394,7 @@ function ComposeTab({ mailReady }: { mailReady: boolean }) {
           <option value="">Select a lead…</option>
           {(leads || []).filter((l) => l.status !== 'closed_lost').map((l) => (
             <option key={l.id} value={l.id}>
-              {leadDisplayName(l)}
-              {l.company ? ` · ${l.company}` : ''} ({l.score}/10)
+              {l.name ? `${l.name}${l.company ? ` · ${l.company}` : ''}` : l.company || l.email || leadDisplayName(l)} ({l.score}/10)
             </option>
           ))}
         </select>
@@ -649,13 +648,25 @@ function SetupTab({ overview }: { overview: NonNullable<ReturnType<typeof useOut
         </div>
         {mail.smtp.configured ? (
           <p className="text-sm">
-            Sending from <span className="font-semibold">{mail.smtp.from}</span>. Replies are read from {mail.imap.host || 'the same mailbox'}.
+            Sending from <span className="font-semibold">{mail.smtp.from}</span> via {mail.smtp.via === 'resend' ? 'Resend' : mail.smtp.via === 'brevo' ? 'Brevo' : 'SMTP'}. Replies are read from {mail.imap.host || 'the same mailbox'}.
           </p>
         ) : (
           <div className="text-sm space-y-2">
-            <p className="text-warning">Email is not connected yet. On Render, add these environment variables, then save:</p>
-            <pre className="rounded-lg bg-bg-soft border border-border-soft p-3 text-xs overflow-x-auto">{`SMTP_HOST=smtp.gmail.com\nSMTP_PORT=587\nSMTP_USER=you@gmail.com\nSMTP_PASS=<a Gmail App Password>\nSMTP_FROM_NAME=Your Name`}</pre>
-            <p className="text-xs text-text-faint">Gmail: turn on 2-Step Verification, then Google Account → Security → App passwords. Use that 16-character password, not your normal one. Also enable IMAP in Gmail settings so replies can be read.</p>
+            <p className="text-warning">Email sending is not connected yet. The recommended way (free, works on any host) is an email service:</p>
+            <ol className="list-decimal pl-5 text-xs text-text-muted space-y-1">
+              <li>Create a free account at resend.com, add your domain, and add the DNS records it shows you (in GoDaddy: DNS).</li>
+              <li>Create an API key in Resend.</li>
+              <li>On Render add the variables below, then save.</li>
+            </ol>
+            <pre className="rounded-lg bg-bg-soft border border-border-soft p-3 text-xs overflow-x-auto">{`RESEND_API_KEY=re_xxxxxxxx
+SMTP_USER=support@yourdomain.com   (the From address)
+SMTP_FROM_NAME=Your Name
+
+# to read replies from your mailbox:
+SMTP_HOST=smtpout.secureserver.net
+SMTP_PASS=<mailbox password>
+IMAP_HOST=imap.titan.email`}</pre>
+            <p className="text-xs text-text-faint">Replies go to your normal mailbox and CLA reads them from there. Plain SMTP also works on hosts that allow it (not Render's free plan).</p>
           </div>
         )}
         <div className="flex flex-wrap items-center gap-2">
@@ -674,7 +685,7 @@ function SetupTab({ overview }: { overview: NonNullable<ReturnType<typeof useOut
         </div>
         {v && (
           <div className="text-xs space-y-1">
-            <p className={v.smtp.ok ? 'text-success' : 'text-critical'}>Sending: {v.smtp.ok ? 'works' : v.smtp.error || 'not configured'}</p>
+            <p className={v.smtp.ok ? 'text-success' : 'text-critical'}>Sending{v.smtp.via && v.smtp.via !== 'smtp' ? ` (${v.smtp.via})` : ''}: {v.smtp.ok ? 'works' : v.smtp.error || 'not configured'}</p>
             <p className={v.imap.ok ? 'text-success' : 'text-critical'}>Reading replies: {v.imap.ok ? 'works' : v.imap.error || 'not configured'}</p>
           </div>
         )}
